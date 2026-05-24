@@ -4070,29 +4070,62 @@ export default function App() {
         <aside className="lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:w-72">
           <Card className="h-full rounded-2xl">
             <CardContent className="p-4">
-              <div className="mb-4 rounded-2xl bg-slate-900 p-4 text-white">
-                <p className="text-xs text-slate-300">目前工地</p>
-                <h2 className="mt-1 text-lg font-bold">{p.name}</h2>
-                <div className="mt-2 inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-100">
-                  {p.status}
+              <div className="mb-4 overflow-hidden rounded-2xl bg-slate-950 text-white shadow-sm">
+                <div className="border-b border-white/10 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-2 text-xs font-medium text-slate-300">
+                      <Building2 className="h-4 w-4" />
+                      目前工地
+                    </span>
+                    <span className="shrink-0 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-100">
+                      {p.status}
+                    </span>
+                  </div>
+                  <h2 className="mt-3 break-words text-xl font-bold leading-snug">{p.name}</h2>
+                  <p className="mt-2 flex items-start gap-1.5 text-xs leading-5 text-slate-300">
+                    <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>{p.address || "未填寫地址"}</span>
+                  </p>
                 </div>
-                <div className="mt-3 space-y-1 text-xs text-slate-300">
-                  <p>開工：{formatDate(p.startDate)}</p>
-                  <p>預計完工：{formatDate(p.endDate)}</p>
-                  <p>累計天數：{countWorkDays(p.startDate)} 天</p>
+                <div className="grid grid-cols-2 gap-2 p-4 text-xs">
+                  <div className="rounded-xl bg-white/10 p-3">
+                    <p className="text-slate-400">開工日期</p>
+                    <p className="mt-1 font-semibold text-slate-50">{formatDate(p.startDate)}</p>
+                  </div>
+                  <div className="rounded-xl bg-white/10 p-3">
+                    <p className="text-slate-400">預計完工</p>
+                    <p className="mt-1 font-semibold text-slate-50">{formatDate(p.endDate)}</p>
+                  </div>
+                  <div className="rounded-xl bg-white/10 p-3">
+                    <p className="text-slate-400">累計天數</p>
+                    <p className="mt-1 font-semibold text-slate-50">{countWorkDays(p.startDate)} 天</p>
+                  </div>
+                  <div className="rounded-xl bg-white/10 p-3">
+                    <p className="text-slate-400">目前功能</p>
+                    <p className="mt-1 truncate font-semibold text-slate-50">{activeModule.label}</p>
+                  </div>
                 </div>
                 {!useLocalPreview ? (
-                  <p className="mt-2 text-xs text-slate-300">
-                    {auth.user.name}｜{auth.user.role}
-                  </p>
+                  <div className="mx-4 mb-3 flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2 text-xs text-slate-300">
+                    <UserRound className="h-3.5 w-3.5" />
+                    <span className="truncate">{auth.user.name}｜{auth.user.role}</span>
+                  </div>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => setP(null)}
-                  className="mt-3 text-xs text-slate-300 underline"
-                >
-                  返回主頁切換工地
-                </button>
+                <div className="px-4 pb-4">
+                  <button
+                    type="button"
+                    onClick={() => setP(null)}
+                    className="group flex w-full items-center justify-between gap-3 rounded-xl bg-white px-3 py-3 text-left text-sm font-semibold text-slate-900 transition hover:bg-slate-100"
+                  >
+                    <span>
+                      <span className="block">返回主頁切換工地</span>
+                      <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                        選擇其他案場或新增工地
+                      </span>
+                    </span>
+                    <ChevronRight className="h-5 w-5 shrink-0 text-slate-500 transition group-hover:translate-x-0.5" />
+                  </button>
+                </div>
               </div>
               <button
                 type="button"
@@ -4120,7 +4153,10 @@ export default function App() {
                     <button
                       key={m.id}
                       type="button"
-                      onClick={() => setActive(m.id)}
+                      onClick={() => {
+                        setActive(m.id);
+                        setModuleListOpen(false);
+                      }}
                       className={`flex gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium ${
                         active === m.id
                           ? "bg-slate-900 text-white"
