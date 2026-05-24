@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | `id` | `text` | 使用者 ID |
 | `email` | `text` | 登入帳號，唯一 |
-| `name` | `text` | 使用者姓名 |
+| `name` | `text` | 使用者暱稱 / 顯示名稱 |
 | `password_hash` | `text` | bcrypt hash 後的密碼 |
 | `role` | `text` | `admin` 或 `member` |
 | `can_view` | `boolean` | 是否可閱覽資料 |
@@ -168,11 +168,23 @@
     "weatherNote": "",
     "work": [],
     "materials": [],
-    "equipment": []
+    "equipment": [],
+    "aiSource": {
+      "name": "daily-report.jpg",
+      "url": "https://blob-store.example/projects/project-id/daily-source/file.jpg"
+    }
   },
-  "attachments": []
+  "attachments": [
+    {
+      "kind": "site-photo",
+      "name": "施工照.jpg",
+      "url": "https://blob-store.example/projects/project-id/daily/2026-05-24/photo.jpg"
+    }
+  ]
 }
 ```
+
+紙本日報 AI 判讀建議先呼叫 `POST /api/ai/daily-report` 取得結構化結果，再讓使用者確認欄位內容，最後才用 `project_records` 寫入正式施工日報。目前紙本日報圖片先限制 3MB 以下，現場施工照暫時限制每份日報最多 10 張；正式接 Vercel Blob 後，Postgres 只保存檔案 metadata 與 URL。
 
 ### 預定進度
 
@@ -239,6 +251,19 @@
 
 成功後會設定 HTTP-only cookie。
 
+### 修改目前帳號密碼
+
+需登入。
+
+`POST /api/auth/password`
+
+```json
+{
+  "currentPassword": "目前密碼",
+  "newPassword": "至少 8 碼的新密碼"
+}
+```
+
 ### 帳號與權限管理
 
 需管理員登入。
@@ -271,6 +296,26 @@
 ```
 
 管理員帳號即使送出 `canView: false` 或 `canEdit: false`，後端仍會回傳最高權限。一般帳號可由管理員切換閱覽與編輯權限。
+
+更新暱稱：
+
+`PATCH /api/users/:id`
+
+```json
+{
+  "name": "Renault"
+}
+```
+
+管理員重設使用者密碼：
+
+`PATCH /api/users/:id`
+
+```json
+{
+  "password": "至少 8 碼的新密碼"
+}
+```
 
 刪除帳號：
 

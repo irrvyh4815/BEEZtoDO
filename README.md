@@ -88,9 +88,13 @@ ADMIN_EMAIL=admin@eztodo.local
 ADMIN_PASSWORD=Admin@123456
 ADMIN_NAME=系統管理員
 SESSION_DAYS=7
+OPENAI_API_KEY=
+OPENAI_DAILY_REPORT_MODEL=gpt-5.4-mini
 ```
 
 `DATABASE_URL` 可來自 Vercel Marketplace 的 Postgres 服務，例如 Neon、Supabase 或其他 PostgreSQL provider。部分 provider 也會注入 `POSTGRES_URL`，程式會同時支援 `DATABASE_URL` 與 `POSTGRES_URL`。
+
+`OPENAI_API_KEY` 用於施工日報的紙本照片 AI 判讀；未設定時，其他功能仍可正常使用，只是 AI 判讀按鈕會回報尚未設定。
 
 第一次登入時，系統會自動建立資料表，並建立預設管理員。
 
@@ -113,6 +117,7 @@ SESSION_DAYS=7
 
 - `POST /api/auth/register`
 - `POST /api/auth/login`
+- `POST /api/auth/password`
 - `GET /api/users`
 - `POST /api/users`
 - `PATCH /api/users/:id`

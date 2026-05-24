@@ -85,8 +85,9 @@ const mods = [
   ["photos", "照片中心"],
 ].map(([id, label]) => ({ id, label, icon: I[id] }));
 
-const APP_VERSION = "eztodo_26052401";
+const APP_VERSION = "eztodo_26052402";
 const SAMPLE_PROJECT_NAME = "範例工地：東區住宅新建工程";
+const DAILY_AI_SOURCE_MAX_BYTES = 3 * 1024 * 1024;
 
 const projectStatusOptions = ["籌備中", "進行中", "收尾中", "暫停", "結案"];
 
@@ -582,22 +583,37 @@ function Del({ label, onClick, icon = false }) {
   );
 }
 
-function toImageAttachments(fileList) {
+function toImageAttachments(fileList, meta = {}) {
   return Array.from(fileList || [])
     .filter((file) => file.type.startsWith("image/"))
-    .map((file) => ({
-      id: `${file.name}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
-      name: file.name,
-      size: file.size,
-      url: URL.createObjectURL(file),
-    }));
+    .map((file) => {
+      const { keepFile, ...attachmentMeta } = meta;
+      return {
+        id: `${file.name}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
+        name: file.name,
+        size: file.size,
+        url: URL.createObjectURL(file),
+        ...(keepFile ? { file } : {}),
+        ...attachmentMeta,
+      };
+    });
 }
 
-function ImageAttachments({ value = [], onChange, className = "" }) {
+function ImageAttachments({
+  value = [],
+  onChange,
+  className = "",
+  title = "圖片附件",
+  description = "可上傳現場照片，作為此筆資料的附件紀錄。",
+  buttonLabel = "上傳圖片",
+  maxFiles,
+  meta,
+}) {
   const inputId = useMemo(
     () => `image-attachments-${Math.random().toString(36).slice(2)}`,
     [],
   );
+  const remaining = Number.isFinite(maxFiles) ? Math.max(maxFiles - value.length, 0) : null;
 
   return (
     <div className={className}>
@@ -608,20 +624,30 @@ function ImageAttachments({ value = [], onChange, className = "" }) {
         multiple
         className="hidden"
         onChange={(event) => {
-          onChange([...(value || []), ...toImageAttachments(event.target.files)]);
+          const picked = toImageAttachments(event.target.files, meta);
+          const limited = Number.isFinite(maxFiles) ? picked.slice(0, remaining) : picked;
+          onChange([...(value || []), ...limited]);
           event.target.value = "";
         }}
       />
       <div className="flex flex-col gap-3 rounded-2xl border border-dashed bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-sm font-medium text-slate-900">圖片附件</p>
-          <p className="mt-1 text-xs text-slate-500">
-            可上傳現場照片，作為此筆資料的附件紀錄。
-          </p>
+          <p className="text-sm font-medium text-slate-900">{title}</p>
+          <p className="mt-1 text-xs text-slate-500">{description}</p>
+          {Number.isFinite(maxFiles) ? (
+            <p className="mt-1 text-xs font-medium text-slate-500">
+              已選 {value.length}/{maxFiles} 張
+            </p>
+          ) : null}
         </div>
-        <Button type="button" variant="outline" onClick={() => document.getElementById(inputId)?.click()}>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={Number.isFinite(maxFiles) && value.length >= maxFiles}
+          onClick={() => document.getElementById(inputId)?.click()}
+        >
           <Camera className="mr-2 h-4 w-4" />
-          上傳圖片
+          {buttonLabel}
         </Button>
       </div>
       {value?.length ? (
@@ -669,6 +695,24 @@ function AttachmentSummary({ attachments = [] }) {
       ))}
     </div>
   );
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function withRowIds(rows, emptyRow) {
+  const source = Array.isArray(rows) && rows.length ? rows : [emptyRow];
+  return source.map((row, index) => ({
+    id: Date.now() + index + Math.floor(Math.random() * 1000),
+    ...emptyRow,
+    ...row,
+  }));
 }
 
 function Header({ title, sub, btn = "新增資料", onAdd }) {
@@ -1561,7 +1605,7 @@ function VendorContacts({ contracts }) {
     </Card>
   );
 }
-function Dashboard({ p, claims, onSwitch, onStatusChange, memoItems, todoItems, contractItems }) {
+function Dashboard({ p, claims, memoItems, todoItems, contractItems }) {
   const m = p.nextClaim || "2026/05";
   const total = sum(claims, m);
   const summary = byTrade(claims, m);
@@ -1569,31 +1613,6 @@ function Dashboard({ p, claims, onSwitch, onStatusChange, memoItems, todoItems, 
 
   return (
     <div>
-      <div className="mb-5 flex flex-col justify-between gap-4 rounded-2xl border bg-white p-5 sm:flex-row sm:items-center">
-        <div className="min-w-0">
-          <p className="text-sm text-slate-500">工地總覽</p>
-          <h1 className="break-words text-2xl font-bold">案場狀態與本月重點</h1>
-          <p className="mt-1 break-words text-sm text-slate-500">
-            快速調整目前狀態，並查看請款、缺失、待辦與 Memo 摘要。
-          </p>
-        </div>
-        <div className="flex flex-col gap-3 sm:min-w-52 sm:items-end">
-          <label className="w-full sm:w-52">
-            <span className="text-xs font-medium text-slate-500">工地狀態</span>
-            <CustomSelect
-              value={p.status}
-              onChange={onStatusChange}
-              options={projectStatusOptions}
-              className="mt-1 space-y-2"
-              selectClassName="text-sm"
-              otherPlaceholder="請輸入自訂工地狀態"
-            />
-          </label>
-          <Button type="button" variant="outline" onClick={onSwitch}>
-            切換工地
-          </Button>
-        </div>
-      </div>
       <Header title="工地總覽" sub="此工地的合約、請款、日報、缺失與材料" />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat title="工地狀態" value={p.status} desc="目前工程狀態" icon={Building2} />
@@ -2279,13 +2298,21 @@ function Daily({ p }) {
     mat: { name: "", spec: "", quantity: "", unit: "", note: "" },
     eq: { name: "", quantity: "", note: "" },
   };
+  const paperInputId = useMemo(
+    () => `daily-ai-source-${Math.random().toString(36).slice(2)}`,
+    [],
+  );
   const [work, setWork] = useState([{ id: 1, ...empty.work }]);
   const [mat, setMat] = useState([{ id: 1, ...empty.mat }]);
   const [eq, setEq] = useState([{ id: 1, ...empty.eq }]);
   const [reportDate, setReportDate] = useState("");
   const [dayWeather, setDayWeather] = useState("");
   const [weatherNote, setWeatherNote] = useState("");
-  const [attachments, setAttachments] = useState([]);
+  const [paperReport, setPaperReport] = useState(null);
+  const [sitePhotos, setSitePhotos] = useState([]);
+  const [aiStatus, setAiStatus] = useState("idle");
+  const [aiMessage, setAiMessage] = useState("");
+  const [aiSummary, setAiSummary] = useState(null);
   const [savedReports, setSavedReports] = useState([]);
 
   const upd = (set, id, key, value) =>
@@ -2297,10 +2324,79 @@ function Daily({ p }) {
     setReportDate("");
     setDayWeather("");
     setWeatherNote("");
-    setAttachments([]);
+    setPaperReport(null);
+    setSitePhotos([]);
+    setAiStatus("idle");
+    setAiMessage("");
+    setAiSummary(null);
     setWork([{ id: Date.now(), ...empty.work }]);
     setMat([{ id: Date.now() + 1, ...empty.mat }]);
     setEq([{ id: Date.now() + 2, ...empty.eq }]);
+  }
+
+  function selectPaperReport(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setAiStatus("error");
+      setAiMessage("目前紙本日報 AI 判讀先支援圖片格式，請上傳 JPG、PNG 或手機拍照圖片。");
+      return;
+    }
+
+    if (file.size > DAILY_AI_SOURCE_MAX_BYTES) {
+      setAiStatus("error");
+      setAiMessage("紙本日報圖片請先壓縮到 3MB 以下；之後接 Vercel Blob 後可改支援較大的原圖。");
+      return;
+    }
+
+    setPaperReport(toImageAttachments([file], { kind: "daily-source", keepFile: true })[0]);
+    setAiStatus("idle");
+    setAiMessage("");
+    setAiSummary(null);
+  }
+
+  function applyAiReport(report) {
+    if (report.date) setReportDate(report.date);
+    if (report.weather) setDayWeather(report.weather);
+    setWeatherNote(report.weatherNote || "");
+    setWork(withRowIds(report.work, empty.work));
+    setMat(withRowIds(report.materials, empty.mat));
+    setEq(withRowIds(report.equipment, empty.eq));
+    setAiSummary(report);
+    setAiStatus("applied");
+    setAiMessage("AI 判讀已填入下方表單，請確認每一格內容後再儲存。");
+  }
+
+  async function analyzePaperReport() {
+    if (!paperReport?.file) {
+      setAiStatus("error");
+      setAiMessage("請先上傳紙本日報圖片。");
+      return;
+    }
+
+    setAiStatus("reading");
+    setAiMessage("AI 正在判讀紙本日報，完成後會把資料填入下方表格。");
+
+    try {
+      const dataUrl = await fileToDataUrl(paperReport.file);
+      const data = await apiFetch("/api/ai/daily-report", {
+        method: "POST",
+        body: JSON.stringify({
+          projectName: p.name,
+          image: {
+            name: paperReport.name,
+            type: paperReport.file.type,
+            dataUrl,
+          },
+        }),
+      });
+      applyAiReport(data.report || {});
+    } catch (error) {
+      setAiStatus("error");
+      setAiMessage(error.message || "AI 判讀失敗，請稍後再試。");
+    }
   }
 
   function saveDaily() {
@@ -2309,11 +2405,17 @@ function Daily({ p }) {
       id: Date.now(),
       date: reportDate || "未填日期",
       weather: dayWeather || "未選擇",
+      weatherNote,
       workers: totalWorkers,
       workCount: work.length,
       materialCount: mat.length,
       equipmentCount: eq.length,
-      attachments,
+      work: work.map(({ id, ...row }) => row),
+      materials: mat.map(({ id, ...row }) => row),
+      equipment: eq.map(({ id, ...row }) => row),
+      sourceAttachment: paperReport,
+      attachments: sitePhotos,
+      aiSummary,
     };
 
     setSavedReports([next, ...savedReports]);
@@ -2330,6 +2432,95 @@ function Daily({ p }) {
       />
       <Card>
         <CardContent className="grid gap-4 p-5 md:grid-cols-2">
+          <div className="md:col-span-2 rounded-2xl border bg-white p-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge>AI 匯入</Badge>
+                  <p className="text-sm font-bold text-slate-900">紙本日報表判讀</p>
+                </div>
+                <p className="mt-2 text-sm text-slate-500">
+                  上傳紙本日報照片後，AI 會先將日期、天氣、工班、材料與機具填入下方表格；儲存前仍可自行修正每個欄位。
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  id={paperInputId}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={selectPaperReport}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => document.getElementById(paperInputId)?.click()}
+                >
+                  <FileText className="mr-2 h-4 w-4" />
+                  上傳紙本日報
+                </Button>
+                <Button
+                  type="button"
+                  disabled={!paperReport || aiStatus === "reading"}
+                  onClick={analyzePaperReport}
+                >
+                  {aiStatus === "reading" ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckSquare className="mr-2 h-4 w-4" />
+                  )}
+                  AI 判讀填入
+                </Button>
+              </div>
+            </div>
+            {paperReport ? (
+              <div className="mt-4 flex items-center gap-3 rounded-xl bg-slate-50 p-3">
+                <img
+                  src={paperReport.url}
+                  alt={paperReport.name}
+                  className="h-16 w-16 rounded-lg border object-cover"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{paperReport.name}</p>
+                  <p className="text-xs text-slate-500">{Math.ceil(paperReport.size / 1024)} KB</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaperReport(null);
+                    setAiStatus("idle");
+                    setAiMessage("");
+                    setAiSummary(null);
+                  }}
+                  className="rounded-lg p-2 text-red-600 hover:bg-red-50"
+                  aria-label={`移除 ${paperReport.name}`}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ) : null}
+            {aiMessage ? (
+              <div
+                className={`mt-3 rounded-xl border px-3 py-2 text-sm ${
+                  aiStatus === "error"
+                    ? "border-red-200 bg-red-50 text-red-700"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                }`}
+              >
+                {aiMessage}
+              </div>
+            ) : null}
+            {Array.isArray(aiSummary?.notes) && aiSummary.notes.length ? (
+              <div className="mt-3 rounded-xl border bg-slate-50 p-3 text-sm text-slate-600">
+                <p className="font-medium text-slate-900">AI 備註</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {aiSummary.notes.map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
           <Input type="date" value={reportDate} onChange={setReportDate} />
           <Input value={p.name} ro />
           <CustomSelect
@@ -2419,17 +2610,18 @@ function Daily({ p }) {
           />
           <ImageAttachments
             className="md:col-span-2"
-            value={attachments}
-            onChange={setAttachments}
+            title="現場施工照"
+            description="附掛在本日報內，之後查閱指定日期時會一起顯示。暫時限制最多 10 張。"
+            buttonLabel="上傳施工照"
+            maxFiles={10}
+            meta={{ kind: "site-photo" }}
+            value={sitePhotos}
+            onChange={setSitePhotos}
           />
-          <div className="rounded-2xl border border-dashed p-5 text-center text-slate-500 md:col-span-2">
-            <p className="font-medium text-slate-900">照片辨識</p>
-            <p className="mt-2">功能開發中</p>
-          </div>
           <div className="flex justify-end md:col-span-2">
             <Button type="button" onClick={saveDaily}>
               <Save className="mr-2 h-4 w-4" />
-              儲存日報
+              確認並儲存日報
             </Button>
           </div>
         </CardContent>
@@ -2447,6 +2639,11 @@ function Daily({ p }) {
                   <p className="text-sm text-slate-500">
                     材料 {report.materialCount} 筆｜機具 {report.equipmentCount} 筆
                   </p>
+                  {report.sourceAttachment ? (
+                    <div className="mt-2">
+                      <Badge>已附紙本日報來源</Badge>
+                    </div>
+                  ) : null}
                   <AttachmentSummary attachments={report.attachments} />
                 </div>
                 <Badge>已暫存</Badge>
@@ -3157,7 +3354,9 @@ function Manual() {
       title: "日常紀錄",
       desc: "適合每天巡場、整理現場狀況與留下照片附件。",
       items: [
-        "施工日報可記錄天氣、工班人數、材料與機具。",
+        "施工日報可記錄天氣、工班人數、材料與機具，也可上傳紙本日報照片交由 AI 先行填入。",
+        "AI 判讀結果會先進入可編輯表格，確認無誤後再自行儲存。",
+        "現場施工照可附掛在日報內，暫時限制每份日報最多 10 張。",
         "工項 Memo 用來記錄需要追蹤或與業主確認的事項。",
         "缺失改善可登錄位置、類型、負責廠商、期限與嚴重程度。",
       ],
@@ -3193,6 +3392,15 @@ function Manual() {
   const versionNotes = [
     {
       version: APP_VERSION,
+      title: "施工日報 AI 匯入與照片附件",
+      items: [
+        "施工日報新增紙本日報圖片上傳與 AI 判讀填入功能。",
+        "AI 判讀後會先填入表格，使用者可修正欄位後再確認儲存。",
+        "施工日報新增現場施工照附件區，暫時限制最多 10 張。",
+      ],
+    },
+    {
+      version: "eztodo_26052401",
       title: "初始操作手冊版本",
       items: [
         "新增版本號顯示，登入頁與登入後介面底部皆可核對版本。",
@@ -4086,8 +4294,6 @@ export default function App() {
           memoItems={projectMemos}
           todoItems={projectTodoItems}
           contractItems={projectContracts}
-          onSwitch={() => setP(null)}
-          onStatusChange={(status) => setP({ ...p, status })}
         />
       );
     }
@@ -4199,15 +4405,23 @@ export default function App() {
                       <Building2 className="h-4 w-4" />
                       目前工地
                     </span>
-                    <span className="shrink-0 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-100">
-                      {p.status}
-                    </span>
                   </div>
                   <h2 className="mt-3 break-words text-xl font-bold leading-snug">{p.name}</h2>
                   <p className="mt-2 flex items-start gap-1.5 text-xs leading-5 text-slate-300">
                     <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     <span>{p.address || "未填寫地址"}</span>
                   </p>
+                  <label className="mt-4 block">
+                    <span className="text-xs font-medium text-slate-400">工地狀態</span>
+                    <CustomSelect
+                      value={p.status}
+                      onChange={(status) => setP({ ...p, status })}
+                      options={projectStatusOptions}
+                      className="mt-2 space-y-2"
+                      selectClassName="border-white/10 bg-white/10 text-sm text-white"
+                      otherPlaceholder="請輸入自訂工地狀態"
+                    />
+                  </label>
                 </div>
                 <div className="grid grid-cols-2 gap-2 p-4 text-xs">
                   <div className="rounded-xl bg-white/10 p-3">
