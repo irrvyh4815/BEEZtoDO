@@ -41,11 +41,14 @@ export async function verifyPassword(password, passwordHash) {
 }
 
 export function publicUser(user) {
+  const isAdmin = user.role === "admin";
   return {
     id: user.id,
     email: user.email,
     name: user.name,
     role: user.role,
+    canView: isAdmin ? true : user.can_view ?? user.canView ?? true,
+    canEdit: isAdmin ? true : user.can_edit ?? user.canEdit ?? false,
   };
 }
 

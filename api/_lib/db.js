@@ -78,6 +78,34 @@ export function mapProject(row) {
   };
 }
 
+export function mapRecord(row) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    module: row.module,
+    title: row.title,
+    status: row.status,
+    payload: row.payload || {},
+    attachments: row.attachments || [],
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapUser(row) {
+  const isAdmin = row.role === "admin";
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    role: row.role,
+    canView: isAdmin ? true : row.can_view,
+    canEdit: isAdmin ? true : row.can_edit,
+    createdAt: row.created_at,
+  };
+}
+
 async function seedAdmin() {
   const email =
     process.env.ADMIN_EMAIL || (!isProductionLike() ? "admin@eztodo.local" : "");
@@ -99,8 +127,8 @@ async function seedAdmin() {
   if (existing.rowCount > 0) return;
 
   await query(
-    `insert into users (id, email, name, password_hash, role)
-     values ($1, lower($2), $3, $4, 'admin')`,
+    `insert into users (id, email, name, password_hash, role, can_view, can_edit)
+     values ($1, lower($2), $3, $4, 'admin', true, true)`,
     [randomUUID(), email, name, await hashPassword(password)],
   );
 }
@@ -121,10 +149,15 @@ async function initializeSchema() {
       email text unique not null,
       name text not null,
       password_hash text not null,
-      role text not null default 'admin',
+      role text not null default 'member',
+      can_view boolean not null default true,
+      can_edit boolean not null default false,
       created_at timestamptz not null default now()
     )
   `);
+
+  await query("alter table users add column if not exists can_view boolean not null default true");
+  await query("alter table users add column if not exists can_edit boolean not null default false");
 
   await query(`
     create table if not exists projects (
@@ -142,6 +175,26 @@ async function initializeSchema() {
       note text not null default '',
       created_at timestamptz not null default now()
     )
+  `);
+
+  await query(`
+    create table if not exists project_records (
+      id text primary key,
+      project_id text not null references projects(id) on delete cascade,
+      module text not null,
+      title text not null,
+      status text not null default '',
+      payload jsonb not null default '{}'::jsonb,
+      attachments jsonb not null default '[]'::jsonb,
+      created_by text references users(id) on delete set null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+  `);
+
+  await query(`
+    create index if not exists project_records_project_module_idx
+    on project_records (project_id, module, created_at desc)
   `);
 
   await seedAdmin();
@@ -166,6 +219,78 @@ export async function findUserByEmail(email) {
     email,
   ]);
   return result.rows[0] || null;
+}
+
+export async function findUserById(id) {
+  const result = await query("select * from users where id = $1", [id]);
+  return result.rows[0] || null;
+}
+
+export async function insertUser({
+  email,
+  name,
+  passwordHash,
+  role = "member",
+  canView = true,
+  canEdit = false,
+}) {
+  const normalizedRole = role === "admin" ? "admin" : "member";
+  const normalizedCanView = normalizedRole === "admin" ? true : Boolean(canView);
+  const normalizedCanEdit =
+    normalizedRole === "admin" ? true : normalizedCanView && Boolean(canEdit);
+  const result = await query(
+    `insert into users (id, email, name, password_hash, role, can_view, can_edit)
+     values ($1, lower($2), $3, $4, $5, $6, $7)
+     returning *`,
+    [
+      randomUUID(),
+      email,
+      name,
+      passwordHash,
+      normalizedRole,
+      normalizedCanView,
+      normalizedCanEdit,
+    ],
+  );
+
+  return result.rows[0];
+}
+
+export async function listUsers() {
+  const result = await query(
+    "select * from users order by role = 'admin' desc, created_at asc",
+  );
+  return result.rows.map(mapUser);
+}
+
+export async function updateUserPermissions(id, { role, canView, canEdit }) {
+  const current = await findUserById(id);
+  if (!current) return null;
+
+  const nextRole =
+    current.role === "admin" ? "admin" : role === "admin" ? "admin" : role || current.role;
+  const requestedCanView = canView ?? current.can_view;
+  const requestedCanEdit = canEdit ?? current.can_edit;
+  const nextCanView = nextRole === "admin" ? true : Boolean(requestedCanView);
+  const nextCanEdit =
+    nextRole === "admin" ? true : nextCanView && Boolean(requestedCanEdit);
+
+  const result = await query(
+    `update users
+     set role = $2,
+         can_view = $3,
+         can_edit = $4
+     where id = $1
+     returning *`,
+    [id, nextRole, nextCanView, nextCanEdit],
+  );
+
+  return result.rows[0] ? mapUser(result.rows[0]) : null;
+}
+
+export async function deleteUser(id) {
+  const result = await query("delete from users where id = $1 and role <> 'admin'", [id]);
+  return result.rowCount > 0;
 }
 
 export async function listProjects() {
@@ -202,5 +327,54 @@ export async function insertProject(project) {
 
 export async function deleteProject(id) {
   const result = await query("delete from projects where id = $1", [id]);
+  return result.rowCount > 0;
+}
+
+export async function listProjectRecords(projectId, module) {
+  const params = [projectId];
+  let where = "where project_id = $1";
+
+  if (module) {
+    params.push(module);
+    where += " and module = $2";
+  }
+
+  const result = await query(
+    `select * from project_records ${where} order by created_at desc`,
+    params,
+  );
+
+  return result.rows.map(mapRecord);
+}
+
+export async function insertProjectRecord(projectId, record, userId) {
+  const payload = record.payload || {};
+  const attachments = record.attachments || [];
+  const result = await query(
+    `insert into project_records (
+      id, project_id, module, title, status, payload, attachments, created_by
+    )
+    values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)
+    returning *`,
+    [
+      randomUUID(),
+      projectId,
+      record.module,
+      record.title,
+      record.status || "",
+      JSON.stringify(payload),
+      JSON.stringify(attachments),
+      userId,
+    ],
+  );
+
+  return mapRecord(result.rows[0]);
+}
+
+export async function deleteProjectRecord(projectId, recordId) {
+  const result = await query(
+    "delete from project_records where project_id = $1 and id = $2",
+    [projectId, recordId],
+  );
   return result.rowCount > 0;
 }

@@ -15,6 +15,8 @@ npm run dev
 http://127.0.0.1:5173
 ```
 
+本機 `npm run dev` 會自動略過登入，並使用前端暫存資料，方便快速預覽畫面。
+
 如果 Windows PowerShell 擋住 `npm.ps1`，可改用：
 
 ```powershell
@@ -32,6 +34,48 @@ vercel dev
 ```bash
 npm run build
 ```
+
+## 部署到 Vercel
+
+建議用 GitHub 連接 Vercel，不需要上傳壓縮檔。
+
+1. 先確認本機可以建置：
+
+```bash
+npm run build
+```
+
+2. 將專案推送到 GitHub：
+
+```powershell
+cd "D:\Documents\EZtoDO工程管理"
+git status --short
+git add .gitignore .env.example README.md package.json package-lock.json index.html vite.config.js tailwind.config.js postcss.config.js src api docs
+git commit -m "Prepare EZtoDO for Vercel deployment"
+git branch -M main
+git remote add origin https://github.com/YOUR_ACCOUNT/YOUR_REPO.git
+git push -u origin main
+```
+
+如果已經設定過 GitHub remote，改用：
+
+```powershell
+git remote set-url origin https://github.com/YOUR_ACCOUNT/YOUR_REPO.git
+git push -u origin main
+```
+
+3. 到 Vercel 選擇 Add New Project，Import Git Repository，選取剛剛的 GitHub repo。
+
+4. Vercel 專案設定：
+
+```text
+Framework Preset: Vite
+Build Command: npm run build
+Output Directory: dist
+Install Command: npm install
+```
+
+5. 在 Vercel 的 Environment Variables 填入下方資料庫與登入設定，再 Deploy。
 
 ## Vercel 環境變數
 
@@ -58,3 +102,26 @@ SESSION_DAYS=7
 ```
 
 正式上線前請務必在 Vercel 將 `ADMIN_PASSWORD` 改成自己的強密碼，並使用新的 `AUTH_SECRET`。
+
+## 資料庫對接
+
+資料表、API payload、圖片附件 metadata 與接 API 順序整理在：
+
+[docs/DATABASE.md](docs/DATABASE.md)
+
+目前後端已預留：
+
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/users`
+- `POST /api/users`
+- `PATCH /api/users/:id`
+- `DELETE /api/users/:id`
+- `GET /api/projects`
+- `POST /api/projects`
+- `DELETE /api/projects/:id`
+- `GET /api/projects/:projectId/records`
+- `POST /api/projects/:projectId/records`
+- `DELETE /api/projects/:projectId/records/:recordId`
+
+各分項表單建議先統一存進 `project_records`，用 `module` 區分資料來源，用 `payload` 存欄位資料，用 `attachments` 存圖片 URL metadata。

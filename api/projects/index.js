@@ -1,4 +1,3 @@
-import { requireUser } from "../_lib/auth.js";
 import { ensureSchema, insertProject, listProjects } from "../_lib/db.js";
 import {
   ApiError,
@@ -7,6 +6,7 @@ import {
   methodNotAllowed,
   readJson,
 } from "../_lib/http.js";
+import { requirePermission } from "../_lib/permissions.js";
 
 export default {
   async fetch(request) {
@@ -15,8 +15,8 @@ export default {
     }
 
     try {
-      requireUser(request);
       await ensureSchema();
+      await requirePermission(request, request.method === "GET" ? "view" : "edit");
 
       if (request.method === "GET") {
         return json({ projects: await listProjects() });

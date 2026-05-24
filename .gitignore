@@ -3,6 +3,7 @@ dist
 artifacts
 .npm-cache
 .vercel
+.git-BACKUP-WRONG*
 vite-dev.*.log
 .env
 .env.local

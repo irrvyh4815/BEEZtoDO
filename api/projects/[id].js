@@ -1,14 +1,14 @@
-import { requireUser } from "../_lib/auth.js";
 import { deleteProject, ensureSchema } from "../_lib/db.js";
 import { ApiError, json, jsonError, methodNotAllowed } from "../_lib/http.js";
+import { requirePermission } from "../_lib/permissions.js";
 
 export default {
   async fetch(request) {
     if (request.method !== "DELETE") return methodNotAllowed(["DELETE"]);
 
     try {
-      requireUser(request);
       await ensureSchema();
+      await requirePermission(request, "edit");
 
       const id = new URL(request.url).pathname.split("/").pop();
       const deleted = await deleteProject(id);
