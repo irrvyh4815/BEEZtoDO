@@ -55,6 +55,7 @@ function Button({ children, className = "", variant, ...props }) {
 
 const I = {
   dashboard: Building2,
+  manual: FileText,
   projects: Megaphone,
   contracts: FileText,
   claims: WalletCards,
@@ -70,6 +71,7 @@ const I = {
 
 const mods = [
   ["dashboard", "總覽"],
+  ["manual", "操作手冊"],
   ["projects", "重要公告"],
   ["contracts", "工程合約"],
   ["claims", "廠商請款"],
@@ -83,12 +85,15 @@ const mods = [
   ["photos", "照片中心"],
 ].map(([id, label]) => ({ id, label, icon: I[id] }));
 
+const APP_VERSION = "eztodo_26052401";
+const SAMPLE_PROJECT_NAME = "範例工地：東區住宅新建工程";
+
 const projectStatusOptions = ["籌備中", "進行中", "收尾中", "暫停", "結案"];
 
 const projects = [
   {
-    name: "東區住宅新建工程",
-    owner: "陳先生",
+    name: SAMPLE_PROJECT_NAME,
+    owner: "範例業主",
     status: "進行中",
     address: "台中市東區",
     defects: 8,
@@ -96,17 +101,8 @@ const projects = [
     nextClaim: "2026/05",
     startDate: "2026-02-16",
     endDate: "2026-11-30",
-  },
-  {
-    name: "北屯店面裝修工程",
-    owner: "林小姐",
-    status: "收尾中",
-    address: "台中市北屯區",
-    defects: 3,
-    dailyPhotos: 18,
-    nextClaim: "2026/06",
-    startDate: "2026-04-01",
-    endDate: "2026-07-15",
+    manager: "範例工地主任",
+    note: "此工地為系統展示用範例，可用來熟悉總覽、請款、Memo、日報與缺失流程。",
   },
 ];
 
@@ -196,7 +192,7 @@ const claimSeed = [
 const contractSeed = [
   {
     id: "contract-1",
-    projectName: "東區住宅新建工程",
+    projectName: SAMPLE_PROJECT_NAME,
     name: "水電配管工程",
     vendor: "宏鑫水電",
     trade: "水電工程",
@@ -211,7 +207,7 @@ const contractSeed = [
   },
   {
     id: "contract-2",
-    projectName: "東區住宅新建工程",
+    projectName: SAMPLE_PROJECT_NAME,
     name: "防水工程",
     vendor: "永信防水",
     trade: "防水工程",
@@ -229,7 +225,7 @@ const contractSeed = [
 const memos = [
   [
     "memo-1",
-    "東區住宅新建工程",
+    SAMPLE_PROJECT_NAME,
     "水電工程",
     "2F 管線路徑待確認",
     "2026-05-26",
@@ -238,7 +234,7 @@ const memos = [
   ],
   [
     "memo-2",
-    "東區住宅新建工程",
+    SAMPLE_PROJECT_NAME,
     "防水工程",
     "浴室門檻加強",
     "2026-05-28",
@@ -247,7 +243,7 @@ const memos = [
   ],
   [
     "memo-3",
-    "東區住宅新建工程",
+    SAMPLE_PROJECT_NAME,
     "磁磚工程",
     "磁磚到料批號",
     "2026-05-29",
@@ -295,7 +291,7 @@ const defectSeed = [
 const scheduleSeed = [
   {
     id: "schedule-1",
-    projectName: "東區住宅新建工程",
+    projectName: SAMPLE_PROJECT_NAME,
     trade: "防水工班",
     name: "3F 防水試水",
     startDate: "2026-05-25",
@@ -307,7 +303,7 @@ const scheduleSeed = [
   },
   {
     id: "schedule-2",
-    projectName: "東區住宅新建工程",
+    projectName: SAMPLE_PROJECT_NAME,
     trade: "水電工班",
     name: "2F 弱電箱定位",
     startDate: "2026-05-26",
@@ -322,7 +318,7 @@ const scheduleSeed = [
 const todoSeed = [
   {
     id: "todo-1",
-    projectName: "東區住宅新建工程",
+    projectName: SAMPLE_PROJECT_NAME,
     title: "確認浴室門檻收邊",
     owner: "李工務",
     date: "2026-05-25",
@@ -332,7 +328,7 @@ const todoSeed = [
   },
   {
     id: "todo-2",
-    projectName: "東區住宅新建工程",
+    projectName: SAMPLE_PROJECT_NAME,
     title: "回覆業主弱電箱位置",
     owner: "王主任",
     date: "2026-05-27",
@@ -557,9 +553,17 @@ console.assert(byTrade(claimSeed, "2026/05")["水電工程"] === 185000, "trade 
 
 function Badge({ children }) {
   return (
-    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+    <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-slate-100 px-3 py-1 text-xs font-medium leading-none text-slate-700">
       {children}
     </span>
+  );
+}
+
+function VersionFooter({ className = "" }) {
+  return (
+    <div className={`text-center text-[11px] font-medium text-slate-400 ${className}`}>
+      版本 {APP_VERSION}
+    </div>
   );
 }
 
@@ -940,6 +944,7 @@ function LoginScreen({ onLogin }) {
           </CardContent>
         </Card>
       </div>
+      <VersionFooter className="mt-4" />
     </Shell>
   );
 }
@@ -1125,6 +1130,7 @@ function ProjectSelect({ onSelect }) {
             </div>
           </CardContent>
         </Card>
+        <VersionFooter className="mt-4" />
       </Shell>
     );
   }
@@ -1133,8 +1139,8 @@ function ProjectSelect({ onSelect }) {
     <Shell full>
       <div className="mb-6 flex flex-col justify-between gap-4 rounded-3xl bg-slate-900 p-6 text-white sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-3xl font-bold">請先選擇工地</h1>
-          <p className="mt-2 text-sm text-slate-300">先選工地，避免多案場資料混在一起。</p>
+          <h1 className="text-3xl font-bold">請先創建/選擇工地</h1>
+          <p className="mt-2 text-sm text-slate-300">建立或選擇工地，避免多案場資料混在一起。</p>
         </div>
       </div>
       <div className="mb-4 flex gap-3 rounded-2xl border bg-white p-3">
@@ -1161,8 +1167,8 @@ function ProjectSelect({ onSelect }) {
         {!loading && filteredProjects.map((project) => (
           <Card key={project.id || project.name} className="rounded-2xl">
             <CardContent className="p-5">
-              <div className="flex justify-between">
-                <div>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
                   <h2 className="text-xl font-bold">{project.name}</h2>
                   <p className="mt-2 flex gap-1 text-sm text-slate-500">
                     <MapPin className="h-4 w-4" />
@@ -1175,6 +1181,11 @@ function ProjectSelect({ onSelect }) {
                   <p className="mt-1 text-sm text-slate-500">
                     開工：{formatDate(project.startDate)}｜預計完工：{formatDate(project.endDate)}
                   </p>
+                  {project.note ? (
+                    <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                      備註：{project.note}
+                    </p>
+                  ) : null}
                   <AttachmentSummary attachments={project.attachments} />
                 </div>
                 <Badge>{project.status}</Badge>
@@ -1221,6 +1232,7 @@ function ProjectSelect({ onSelect }) {
           新增工地
         </Button>
       </div>
+      <VersionFooter className="mt-6" />
     </Shell>
   );
 }
@@ -1559,22 +1571,11 @@ function Dashboard({ p, claims, onSwitch, onStatusChange, memoItems, todoItems, 
     <div>
       <div className="mb-5 flex flex-col justify-between gap-4 rounded-2xl border bg-white p-5 sm:flex-row sm:items-center">
         <div className="min-w-0">
-          <p className="text-sm text-slate-500">目前工地</p>
-          <h1 className="break-words text-2xl font-bold">{p.name}</h1>
-          <p className="break-words text-sm text-slate-500">
-            {p.address}｜業主：{p.owner}
+          <p className="text-sm text-slate-500">工地總覽</p>
+          <h1 className="break-words text-2xl font-bold">案場狀態與本月重點</h1>
+          <p className="mt-1 break-words text-sm text-slate-500">
+            快速調整目前狀態，並查看請款、缺失、待辦與 Memo 摘要。
           </p>
-          <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-3">
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              開工日期：<b>{formatDate(p.startDate)}</b>
-            </div>
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              預計完工：<b>{formatDate(p.endDate)}</b>
-            </div>
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              累計天數：<b>{workDays}</b>
-            </div>
-          </div>
         </div>
         <div className="flex flex-col gap-3 sm:min-w-52 sm:items-end">
           <label className="w-full sm:w-52">
@@ -3141,6 +3142,126 @@ function Schedule({ p, items, onSave, onDelete }) {
   );
 }
 
+function Manual() {
+  const manualSections = [
+    {
+      title: "開始使用",
+      desc: "從選擇工地開始，把每一筆資料都歸到正確案場。",
+      items: [
+        "進入系統後先創建或選擇工地。",
+        "左側深色工地卡可查看目前案場、狀態、開工日期與累計天數。",
+        "使用功能列表切換總覽、日報、請款、缺失與其他模組。",
+      ],
+    },
+    {
+      title: "日常紀錄",
+      desc: "適合每天巡場、整理現場狀況與留下照片附件。",
+      items: [
+        "施工日報可記錄天氣、工班人數、材料與機具。",
+        "工項 Memo 用來記錄需要追蹤或與業主確認的事項。",
+        "缺失改善可登錄位置、類型、負責廠商、期限與嚴重程度。",
+      ],
+    },
+    {
+      title: "合約與廠商",
+      desc: "把廠商聯絡資料、合約與請款資訊集中查找。",
+      items: [
+        "工程合約可建立廠商、聯絡人、電話與合約金額。",
+        "廠商請款可依期別、月份、工種與狀態記錄。",
+        "總覽的廠商資訊會聯動工程合約，方便快速查找電話與聯絡人。",
+      ],
+    },
+    {
+      title: "進度與行程",
+      desc: "將待辦、Memo 與預定進度轉成更容易比較的時間視圖。",
+      items: [
+        "總覽月曆會顯示待辦事項與工項 Memo。",
+        "預定進度表單儲存後會同步更新甘特圖。",
+        "甘特圖 X 軸為工作天與日期，Y 軸為工種。",
+      ],
+    },
+    {
+      title: "帳號管理",
+      desc: "管理員可建立帳號並調整使用者是否能閱覽或編輯。",
+      items: [
+        "右上角管理可開啟帳號與權限管理。",
+        "目前帳號設定可修改暱稱、變更密碼或登出。",
+        "帳號列表採收合式呈現，展開後可重設密碼或調整權限。",
+      ],
+    },
+  ];
+  const versionNotes = [
+    {
+      version: APP_VERSION,
+      title: "初始操作手冊版本",
+      items: [
+        "新增版本號顯示，登入頁與登入後介面底部皆可核對版本。",
+        "保留單一範例工地，並在工地卡上標示範例備註。",
+        "新增操作手冊頁，後續每次版本更新都在此補充新增功能操作說明。",
+      ],
+    },
+  ];
+
+  return (
+    <div>
+      <Header
+        title="操作手冊"
+        sub={`目前版本：${APP_VERSION}。此頁會隨版本更新補充新增功能與操作說明。`}
+      />
+      <div className="grid gap-4 lg:grid-cols-2">
+        {manualSections.map((section) => (
+          <Card key={section.title}>
+            <CardContent className="p-5">
+              <h2 className="text-lg font-bold">{section.title}</h2>
+              <p className="mt-1 text-sm text-slate-500">{section.desc}</p>
+              <div className="mt-4 space-y-2">
+                {section.items.map((item, index) => (
+                  <div key={item} className="flex gap-3 rounded-xl border bg-slate-50 p-3 text-sm">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
+                      {index + 1}
+                    </span>
+                    <span className="leading-6 text-slate-700">{item}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      <Card className="mt-4">
+        <CardContent className="p-5">
+          <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
+            <div>
+              <h2 className="text-lg font-bold">版本更新紀錄</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                新增功能上線時，請同步在此補上操作入口與注意事項。
+              </p>
+            </div>
+            <Badge>{APP_VERSION}</Badge>
+          </div>
+          <div className="mt-4 grid gap-3">
+            {versionNotes.map((note) => (
+              <div key={note.version} className="rounded-2xl border p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-bold">{note.title}</h3>
+                  <Badge>{note.version}</Badge>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {note.items.map((item) => (
+                    <p key={item} className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                      {item}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function Placeholder({ title }) {
   const schema =
     {
@@ -3956,6 +4077,7 @@ export default function App() {
     const projectScheduleItems = scheduleItems.filter((item) => matchesProject(item, p));
     const projectTodoItems = todoItems.filter((item) => matchesProject(item, p));
 
+    if (active === "manual") return <Manual />;
     if (active === "dashboard") {
       return (
         <Dashboard
@@ -4069,7 +4191,7 @@ export default function App() {
         <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4 lg:flex-row">
         <aside className="lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:w-72">
           <Card className="h-full rounded-2xl">
-            <CardContent className="p-4">
+            <CardContent className="flex h-full flex-col p-4">
               <div className="mb-4 overflow-hidden rounded-2xl bg-slate-950 text-white shadow-sm">
                 <div className="border-b border-white/10 p-4">
                   <div className="flex items-center justify-between gap-2">
@@ -4169,6 +4291,7 @@ export default function App() {
                   );
                 })}
               </nav>
+              <VersionFooter className="mt-auto pt-4" />
             </CardContent>
           </Card>
         </aside>

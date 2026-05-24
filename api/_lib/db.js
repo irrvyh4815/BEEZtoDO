@@ -7,22 +7,17 @@ const { Pool } = pg;
 
 const sampleProjects = [
   {
-    name: "東區住宅新建工程",
-    owner: "陳先生",
+    name: "範例工地：東區住宅新建工程",
+    owner: "範例業主",
     status: "進行中",
     address: "台中市東區",
     defects: 8,
     dailyPhotos: 32,
     nextClaim: "2026/05",
-  },
-  {
-    name: "北屯店面裝修工程",
-    owner: "林小姐",
-    status: "收尾中",
-    address: "台中市北屯區",
-    defects: 3,
-    dailyPhotos: 18,
-    nextClaim: "2026/06",
+    startDate: "2026-02-16",
+    endDate: "2026-11-30",
+    manager: "範例工地主任",
+    note: "此工地為系統展示用範例，可用來熟悉總覽、請款、Memo、日報與缺失流程。",
   },
 ];
 
@@ -142,6 +137,41 @@ async function seedProjects() {
   }
 }
 
+async function syncSampleProjects() {
+  const sample = sampleProjects[0];
+
+  await query("delete from projects where name = $1", ["北屯店面裝修工程"]);
+  await query(
+    `update projects
+     set name = $2,
+         owner = $3,
+         status = $4,
+         address = $5,
+         defects = $6,
+         daily_photos = $7,
+         next_claim = $8,
+         start_date = $9,
+         end_date = $10,
+         manager = $11,
+         note = $12
+     where name = $1`,
+    [
+      "東區住宅新建工程",
+      sample.name,
+      sample.owner,
+      sample.status,
+      sample.address,
+      sample.defects,
+      sample.dailyPhotos,
+      sample.nextClaim,
+      sample.startDate,
+      sample.endDate,
+      sample.manager,
+      sample.note,
+    ],
+  );
+}
+
 async function initializeSchema() {
   await query(`
     create table if not exists users (
@@ -197,6 +227,7 @@ async function initializeSchema() {
     on project_records (project_id, module, created_at desc)
   `);
 
+  await syncSampleProjects();
   await seedAdmin();
   await seedProjects();
 }
@@ -283,6 +314,30 @@ export async function updateUserPermissions(id, { role, canView, canEdit }) {
      where id = $1
      returning *`,
     [id, nextRole, nextCanView, nextCanEdit],
+  );
+
+  return result.rows[0] ? mapUser(result.rows[0]) : null;
+}
+
+export async function updateUserProfile(id, { name }) {
+  const result = await query(
+    `update users
+     set name = $2
+     where id = $1
+     returning *`,
+    [id, name],
+  );
+
+  return result.rows[0] ? mapUser(result.rows[0]) : null;
+}
+
+export async function updateUserPassword(id, passwordHash) {
+  const result = await query(
+    `update users
+     set password_hash = $2
+     where id = $1
+     returning *`,
+    [id, passwordHash],
   );
 
   return result.rows[0] ? mapUser(result.rows[0]) : null;

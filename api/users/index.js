@@ -34,6 +34,9 @@ export default {
       if (!body.email?.trim() || !body.name?.trim() || !body.password) {
         throw new ApiError(400, "請輸入姓名、帳號與密碼", "USER_FIELDS_REQUIRED");
       }
+      if (body.password.length < 8) {
+        throw new ApiError(400, "密碼至少需要 8 碼", "PASSWORD_TOO_SHORT");
+      }
 
       const user = await insertUser({
         email: body.email,
