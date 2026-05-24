@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -841,7 +841,7 @@ function LoginScreen({ onLogin }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const loginTags = ["工地管理", "施工日報", "廠商請款", "缺失追蹤", "甘特圖", "權限控管"];
+  const loginTags = ["工地管理", "施工日報", "廠商請款", "缺失追蹤", "甘特圖", "照片附件"];
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -871,13 +871,13 @@ function LoginScreen({ onLogin }) {
             </div>
             <p className="text-right text-sm font-medium text-slate-300">製作團隊：R3nault</p>
           </div>
-          <p className="text-sm font-medium text-slate-300">工程案場管理，一套掌握</p>
+          <p className="text-sm font-medium text-slate-300">把案場每天的大小事，整理成能追蹤的進度</p>
           <h1 className="mt-3 max-w-2xl text-3xl font-bold leading-tight sm:text-4xl">
             EZtoDO工程管理程式
           </h1>
           <p className="mt-4 max-w-xl text-base leading-7 text-slate-200">
-            從工地進度、廠商合約、請款節點到缺失改善，把每天散落在訊息、
-            表單與照片裡的工程資訊，整理成可追蹤、可查找、可交接的工作流。
+            從工地進度、廠商合約、請款節點到缺失改善，將現場訊息、
+            表單與照片紀錄收進同一個工作台，讓工程管理少一點翻找，多一點掌握。
           </p>
           <div className="mt-6 flex flex-wrap gap-2">
             {loginTags.map((item) => (
@@ -897,7 +897,7 @@ function LoginScreen({ onLogin }) {
             </div>
             <div>
               <p className="text-2xl font-bold">03</p>
-              <p className="mt-1 text-xs leading-5 text-slate-300">管理員可配置帳號權限，保留閱覽與編輯界線。</p>
+              <p className="mt-1 text-xs leading-5 text-slate-300">預定進度搭配日曆檢視，讓下一步工作更好安排。</p>
             </div>
           </div>
         </div>
@@ -3323,8 +3323,9 @@ function Placeholder({ title }) {
   );
 }
 
-function AdminPanel({ currentUser, onLogout }) {
-  const [open, setOpen] = useState(false);
+function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
+  const panelRef = useRef(null);
+  const triggerRef = useRef(null);
   const [users, setUsers] = useState(adminSeedUsers.map(normalizeAccountPermissions));
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -3365,6 +3366,21 @@ function AdminPanel({ currentUser, onLogout }) {
       active = false;
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handlePointerDown(event) {
+      const target = event.target;
+      if (panelRef.current?.contains(target) || triggerRef.current?.contains(target)) {
+        return;
+      }
+      onOpenChange(false);
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [open, onOpenChange]);
 
   if (!useLocalPreview && currentUser?.role !== "admin") return null;
 
@@ -3550,8 +3566,9 @@ function AdminPanel({ currentUser, onLogout }) {
   return (
     <>
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen(!open)}
+        onClick={() => onOpenChange(!open)}
         className="fixed right-4 top-4 z-50 inline-flex items-center gap-2 rounded-full border bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-lg hover:bg-slate-50"
       >
         <ShieldCheck className="h-4 w-4" />
@@ -3559,7 +3576,7 @@ function AdminPanel({ currentUser, onLogout }) {
       </button>
 
       {open ? (
-        <div className="fixed right-4 top-16 z-50 w-[calc(100vw-2rem)] max-w-xl rounded-2xl border bg-white shadow-xl">
+        <div ref={panelRef} className="fixed right-4 top-16 z-50 w-[calc(100vw-2rem)] max-w-xl rounded-2xl border bg-white shadow-xl">
           <div className="border-b p-4">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -3570,7 +3587,7 @@ function AdminPanel({ currentUser, onLogout }) {
               </div>
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={() => onOpenChange(false)}
                 className="rounded-lg px-2 py-1 text-sm text-slate-500 hover:bg-slate-100"
               >
                 關閉
@@ -3888,6 +3905,7 @@ export default function App() {
   const [scheduleItems, setScheduleItems] = useState(scheduleSeed);
   const [todoItems, setTodoItems] = useState(todoSeed);
   const [moduleListOpen, setModuleListOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
 
   useEffect(() => {
     if (useLocalPreview) return;
@@ -3915,6 +3933,7 @@ export default function App() {
       setP(null);
       setActive("dashboard");
       setModuleListOpen(false);
+      setAdminOpen(false);
       return;
     }
 
@@ -3922,7 +3941,12 @@ export default function App() {
     setP(null);
     setActive("dashboard");
     setModuleListOpen(false);
+    setAdminOpen(false);
     setAuth({ loading: false, user: null });
+  }
+
+  function closeAdminPanel() {
+    if (adminOpen) setAdminOpen(false);
   }
 
   const page = useMemo(() => {
@@ -4011,14 +4035,21 @@ export default function App() {
   if (!p) {
     return (
       <>
-        <AdminPanel currentUser={auth.user} onLogout={handleLogout} />
-        <ProjectSelect
-          onSelect={(project) => {
-            setP(project);
-            setActive("dashboard");
-            setModuleListOpen(false);
-          }}
+        <AdminPanel
+          currentUser={auth.user}
+          onLogout={handleLogout}
+          open={adminOpen}
+          onOpenChange={setAdminOpen}
         />
+        <div onPointerDownCapture={closeAdminPanel}>
+          <ProjectSelect
+            onSelect={(project) => {
+              setP(project);
+              setActive("dashboard");
+              setModuleListOpen(false);
+            }}
+          />
+        </div>
       </>
     );
   }
@@ -4028,8 +4059,13 @@ export default function App() {
 
   return (
     <>
-      <AdminPanel currentUser={auth.user} onLogout={handleLogout} />
-      <div className="min-h-screen bg-slate-50 text-slate-900">
+      <AdminPanel
+        currentUser={auth.user}
+        onLogout={handleLogout}
+        open={adminOpen}
+        onOpenChange={setAdminOpen}
+      />
+      <div onPointerDownCapture={closeAdminPanel} className="min-h-screen bg-slate-50 text-slate-900">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4 lg:flex-row">
         <aside className="lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:w-72">
           <Card className="h-full rounded-2xl">
@@ -4084,10 +4120,7 @@ export default function App() {
                     <button
                       key={m.id}
                       type="button"
-                      onClick={() => {
-                        setActive(m.id);
-                        setModuleListOpen(false);
-                      }}
+                      onClick={() => setActive(m.id)}
                       className={`flex gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium ${
                         active === m.id
                           ? "bg-slate-900 text-white"
