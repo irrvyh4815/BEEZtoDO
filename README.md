@@ -119,7 +119,7 @@ SESSION_DAYS=7
 - `DELETE /api/users/:id`
 - `GET /api/projects`
 - `POST /api/projects`
-- `DELETE /api/projects/:id`
+- `DELETE /api/projects/:projectId`
 - `GET /api/projects/:projectId/records`
 - `POST /api/projects/:projectId/records`
 - `DELETE /api/projects/:projectId/records/:recordId`

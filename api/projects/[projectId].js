@@ -10,8 +10,8 @@ export default {
       await ensureSchema();
       await requirePermission(request, "edit");
 
-      const id = new URL(request.url).pathname.split("/").pop();
-      const deleted = await deleteProject(id);
+      const projectId = new URL(request.url).pathname.split("/").pop();
+      const deleted = await deleteProject(projectId);
 
       if (!deleted) {
         throw new ApiError(404, "找不到工地資料", "PROJECT_NOT_FOUND");

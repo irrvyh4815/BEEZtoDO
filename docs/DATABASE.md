@@ -282,7 +282,7 @@
 
 `POST /api/projects`
 
-`DELETE /api/projects/:id`
+`DELETE /api/projects/:projectId`
 
 ### 工地內表單資料
 
