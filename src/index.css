@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+* {
+  box-sizing: border-box;
+}
+
 :root {
   color-scheme: light;
   font-family:
@@ -13,6 +17,11 @@ body {
   margin: 0;
   min-width: 320px;
   background: #f8fafc;
+  -webkit-text-size-adjust: 100%;
+}
+
+#root {
+  min-height: 100vh;
 }
 
 button,

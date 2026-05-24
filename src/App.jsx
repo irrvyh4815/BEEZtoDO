@@ -40,7 +40,7 @@ function CardContent({ children, className = "" }) {
 
 function Button({ children, className = "", variant, ...props }) {
   const base =
-    "inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium transition";
+    "inline-flex max-w-full items-center justify-center gap-1 whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60";
   const style =
     variant === "outline"
       ? "bg-white text-slate-900 hover:bg-slate-100"
@@ -670,12 +670,12 @@ function AttachmentSummary({ attachments = [] }) {
 function Header({ title, sub, btn = "新增資料", onAdd }) {
   return (
     <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div>
+      <div className="min-w-0">
         <h1 className="text-2xl font-bold">{title}</h1>
-        <p className="mt-1 text-sm text-slate-500">{sub}</p>
+        <p className="mt-1 break-words text-sm text-slate-500">{sub}</p>
       </div>
       {onAdd ? (
-        <Button type="button" className="rounded-xl" onClick={onAdd}>
+        <Button type="button" className="w-full rounded-xl sm:w-auto" onClick={onAdd}>
           <Plus className="mr-2 h-4 w-4" />
           {btn}
         </Button>
@@ -688,13 +688,13 @@ function Stat({ title, value, desc, icon: Icon }) {
   return (
     <Card className="rounded-2xl shadow-sm">
       <CardContent className="p-5">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
             <p className="text-sm text-slate-500">{title}</p>
-            <h3 className="mt-2 text-2xl font-bold">{value}</h3>
+            <h3 className="mt-2 break-words text-xl font-bold sm:text-2xl">{value}</h3>
             <p className="mt-1 text-xs text-slate-500">{desc}</p>
           </div>
-          <div className="rounded-2xl bg-slate-100 p-3">
+          <div className="shrink-0 rounded-2xl bg-slate-100 p-3">
             <Icon className="h-6 w-6" />
           </div>
         </div>
@@ -1185,63 +1185,86 @@ function ProjectSelect({ onSelect, onLogout }) {
 
 function Shell({ children, full = false }) {
   return (
-    <div className="min-h-screen bg-slate-50 p-4 text-slate-900">
+    <div className="min-h-screen bg-slate-50 p-3 text-slate-900 sm:p-4">
       <div className={full ? "mx-auto w-full max-w-5xl" : ""}>{children}</div>
     </div>
   );
 }
 
-function DashboardCalendar({ project, todos, memos: memoItems }) {
+function DashboardCalendar({ project, todos, memos: memoItems, className = "" }) {
   const [monthKey, setMonthKey] = useState(todayKey().slice(0, 7));
   const days = useMemo(() => monthCalendarDays(monthKey), [monthKey]);
   const weekDays = ["日", "一", "二", "三", "四", "五", "六"];
+  const eventsByDate = useMemo(() => {
+    const map = new Map();
+    const pushEvent = (date, event) => {
+      if (!date) return;
+      map.set(date, [...(map.get(date) || []), event]);
+    };
 
-  function eventsForDate(date) {
-    const todoEvents = todos
-      .filter((todo) => todo.date === date)
-      .map((todo) => ({
+    todos.forEach((todo) => {
+      pushEvent(todo.date, {
         id: todo.id,
         type: "todo",
         title: todo.title,
         meta: todo.owner || todo.status,
-      }));
-    const memoEvents = memoItems
-      .filter((memo) => memo.date === date)
-      .map((memo) => ({
+      });
+    });
+    memoItems.forEach((memo) => {
+      pushEvent(memo.date, {
         id: memo.id,
         type: "memo",
         title: memo.title,
         meta: memo.trade || memo.status,
-      }));
+      });
+    });
 
-    return [...todoEvents, ...memoEvents];
-  }
+    return map;
+  }, [todos, memoItems]);
+  const daysWithEvents = days
+    .map((day) => ({ ...day, events: eventsByDate.get(day.date) || [] }))
+    .filter((day) => day.currentMonth && day.events.length);
 
   return (
-    <Card>
+    <Card className={`overflow-hidden ${className}`}>
       <CardContent className="p-5">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
+          <div className="min-w-0">
             <h2 className="text-lg font-bold">待辦事項與工項 Memo</h2>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 break-words text-sm text-slate-500">
               {project.name} 的月曆檢視
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" onClick={() => setMonthKey(moveMonth(monthKey, -1))}>
+          <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={() => setMonthKey(moveMonth(monthKey, -1))}
+            >
               上月
             </Button>
-            <Button type="button" variant="outline" onClick={() => setMonthKey(todayKey().slice(0, 7))}>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={() => setMonthKey(todayKey().slice(0, 7))}
+            >
               今天
             </Button>
-            <Button type="button" variant="outline" onClick={() => setMonthKey(moveMonth(monthKey, 1))}>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={() => setMonthKey(moveMonth(monthKey, 1))}
+            >
               下月
             </Button>
           </div>
         </div>
 
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <h3 className="text-2xl font-bold">{monthTitle(monthKey)}</h3>
+          <h3 className="text-xl font-bold sm:text-2xl">{monthTitle(monthKey)}</h3>
           <div className="flex flex-wrap gap-2 text-xs">
             <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-3 py-1 font-medium text-amber-700">
               <span className="h-2 w-2 rounded-full bg-amber-500" />
@@ -1254,22 +1277,97 @@ function DashboardCalendar({ project, todos, memos: memoItems }) {
           </div>
         </div>
 
-        <div className="overflow-auto rounded-2xl border bg-white">
-          <div className="grid min-w-[840px] grid-cols-7 border-b bg-slate-50">
+        <div className="sm:hidden">
+          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-slate-500">
+            {weekDays.map((day) => (
+              <div key={day} className="py-1">
+                {day}
+              </div>
+            ))}
+          </div>
+          <div className="mt-1 grid grid-cols-7 gap-1">
+            {days.map((day) => {
+              const events = eventsByDate.get(day.date) || [];
+
+              return (
+                <div
+                  key={day.date}
+                  className={`flex aspect-square min-h-10 flex-col items-center justify-center rounded-xl border p-1 ${
+                    day.currentMonth ? "bg-white" : "bg-slate-50 text-slate-300"
+                  } ${day.isToday ? "border-slate-900" : ""}`}
+                >
+                  <span
+                    className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
+                      day.isToday ? "bg-slate-900 text-white" : ""
+                    }`}
+                  >
+                    {day.day}
+                  </span>
+                  <div className="mt-1 flex h-2 items-center justify-center gap-0.5">
+                    {events.slice(0, 3).map((event) => (
+                      <span
+                        key={`${event.type}-${event.id}`}
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          event.type === "todo" ? "bg-amber-500" : "bg-emerald-500"
+                        }`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-4 max-h-80 overflow-auto rounded-2xl border bg-slate-50">
+            {daysWithEvents.length ? (
+              <div className="divide-y">
+                {daysWithEvents.map((day) => (
+                  <div key={day.date} className="grid grid-cols-[3.5rem_1fr] gap-3 p-3">
+                    <div className="text-center">
+                      <p className="text-xs text-slate-500">{shortDateLabel(day.date)}</p>
+                      <p className="mt-1 text-lg font-bold text-slate-900">{day.day}</p>
+                    </div>
+                    <div className="space-y-2">
+                      {day.events.map((event) => (
+                        <div
+                          key={`${event.type}-${event.id}`}
+                          className={`rounded-xl border px-3 py-2 text-xs ${
+                            event.type === "todo"
+                              ? "border-amber-200 bg-amber-50 text-amber-800"
+                              : "border-emerald-200 bg-emerald-50 text-emerald-800"
+                          }`}
+                        >
+                          <p className="font-semibold">{event.title}</p>
+                          {event.meta ? <p className="mt-0.5 opacity-80">{event.meta}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-5 text-center text-sm text-slate-500">
+                本月尚無待辦事項或工項 Memo。
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="hidden overflow-x-auto rounded-2xl border bg-white sm:block">
+          <div className="grid min-w-[700px] grid-cols-7 border-b bg-slate-50">
             {weekDays.map((day) => (
               <div key={day} className="border-r px-3 py-2 text-center text-xs font-bold text-slate-500 last:border-r-0">
                 {day}
               </div>
             ))}
           </div>
-          <div className="grid min-w-[840px] grid-cols-7">
+          <div className="grid min-w-[700px] grid-cols-7">
             {days.map((day, index) => {
-              const events = eventsForDate(day.date);
+              const events = eventsByDate.get(day.date) || [];
 
               return (
                 <div
                   key={day.date}
-                  className={`min-h-32 border-r border-b p-2 ${
+                  className={`min-h-28 border-r border-b p-2 md:min-h-32 ${
                     day.currentMonth ? "bg-white" : "bg-slate-50 text-slate-400"
                   } ${(index + 1) % 7 === 0 ? "border-r-0" : ""}`}
                 >
@@ -1285,7 +1383,7 @@ function DashboardCalendar({ project, todos, memos: memoItems }) {
                   <div className="space-y-1">
                     {events.slice(0, 3).map((event) => (
                       <div
-                        key={event.id}
+                        key={`${event.type}-${event.id}`}
                         className={`rounded-md border px-2 py-1 text-xs ${
                           event.type === "todo"
                             ? "border-amber-200 bg-amber-50 text-amber-800"
@@ -1418,13 +1516,13 @@ function Dashboard({ p, claims, onSwitch, onStatusChange, memoItems, todoItems, 
   return (
     <div>
       <div className="mb-5 flex flex-col justify-between gap-4 rounded-2xl border bg-white p-5 sm:flex-row sm:items-center">
-        <div>
+        <div className="min-w-0">
           <p className="text-sm text-slate-500">目前工地</p>
-          <h1 className="text-2xl font-bold">{p.name}</h1>
-          <p className="text-sm text-slate-500">
+          <h1 className="break-words text-2xl font-bold">{p.name}</h1>
+          <p className="break-words text-sm text-slate-500">
             {p.address}｜業主：{p.owner}
           </p>
-          <div className="mt-3 grid gap-2 text-sm text-slate-600 sm:grid-cols-3">
+          <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-3">
             <div className="rounded-xl bg-slate-50 px-3 py-2">
               開工日期：<b>{formatDate(p.startDate)}</b>
             </div>
@@ -1483,7 +1581,7 @@ function Dashboard({ p, claims, onSwitch, onStatusChange, memoItems, todoItems, 
             </div>
           </CardContent>
         </Card>
-        <DashboardCalendar project={p} todos={todoItems} memos={memoItems} />
+        <DashboardCalendar className="lg:col-span-2" project={p} todos={todoItems} memos={memoItems} />
         <VendorContacts contracts={contractItems} />
       </div>
     </div>
@@ -2695,7 +2793,17 @@ function Schedule({ p, items, onSave, onDelete }) {
     return Array.from(new Set(names));
   }, [items]);
   const chartTrades = trades.length ? trades : ["尚無工種"];
-  const gridTemplateColumns = `160px repeat(${Math.max(dates.length, 1)}, minmax(116px, 116px))`;
+  const itemsByTrade = useMemo(
+    () =>
+      chartTrades.map((trade) => ({
+        trade,
+        items: items.filter((item) => (item.trade || "未分類工種") === trade),
+      })),
+    [chartTrades, items],
+  );
+  const chartDayCount = Math.max(dates.length, 1);
+  const gridTemplateColumns = `minmax(132px, 160px) repeat(${chartDayCount}, minmax(96px, 1fr))`;
+  const chartMinWidth = 132 + chartDayCount * 96;
 
   function resetDraft() {
     setDraft(createScheduleDraft(p));
@@ -2851,24 +2959,64 @@ function Schedule({ p, items, onSave, onDelete }) {
             </div>
             <Badge>{formatDate(chartRange.start)} - {formatDate(chartRange.end)}</Badge>
           </div>
-          <div className="max-h-[560px] overflow-auto rounded-2xl border">
-            <div className="grid min-w-[720px]" style={{ gridTemplateColumns }}>
+          <div className="grid gap-3 md:hidden">
+            {items.length ? (
+              itemsByTrade.map(({ trade, items: tradeItems }) => (
+                <div key={trade} className="rounded-2xl border bg-slate-50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="min-w-0 break-words text-sm font-bold">{trade}</h3>
+                    <Badge>{tradeItems.length} 項</Badge>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {tradeItems.map((item) => (
+                      <div key={item.id} className="rounded-xl border bg-white p-3 text-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="break-words font-bold">{item.name}</p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {shortDateLabel(item.startDate)} - {shortDateLabel(item.endDate)}
+                            </p>
+                          </div>
+                          <Badge>{item.status}</Badge>
+                        </div>
+                        <div className="mt-3 h-2 rounded-full bg-slate-100">
+                          <div
+                            className="h-2 rounded-full bg-slate-900"
+                            style={{ width: `${item.percent}%` }}
+                          />
+                        </div>
+                        <p className="mt-1 text-right text-xs font-medium text-slate-500">
+                          {item.percent}%
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-2xl border border-dashed p-6 text-center text-sm text-slate-500">
+                尚無預定進度，新增後會在這裡顯示手機版摘要。
+              </div>
+            )}
+          </div>
+          <div className="hidden max-h-[min(64vh,560px)] overflow-auto rounded-2xl border md:block">
+            <div className="grid" style={{ gridTemplateColumns, minWidth: `${chartMinWidth}px` }}>
               <div className="sticky left-0 top-0 z-20 border-b border-r bg-slate-900 p-3 text-sm font-bold text-white">
                 工種
               </div>
               {dates.map((row) => (
                 <div
                   key={row.date}
-                  className="sticky top-0 z-10 border-b border-r bg-slate-900 p-2 text-white"
+                  className="sticky top-0 z-10 border-b border-r bg-slate-900 p-2 text-center text-white"
                 >
                   <p className="text-xs font-bold">第 {row.workDay} 天</p>
-                  <p className="mt-1 text-[11px] text-slate-300">{row.date}</p>
+                  <p className="mt-1 text-[11px] text-slate-300">{row.label}</p>
                 </div>
               ))}
               {chartTrades.map((trade) => (
                 <React.Fragment key={trade}>
                   <div className="sticky left-0 z-10 border-b border-r bg-white p-3">
-                    <p className="text-sm font-bold">{trade}</p>
+                    <p className="break-words text-sm font-bold">{trade}</p>
                     <p className="text-xs text-slate-500">工種 / 分包</p>
                   </div>
                   {dates.map((row) => {
@@ -3133,11 +3281,19 @@ function Placeholder({ title }) {
   );
 }
 
-function AdminPanel({ currentUser }) {
+function AdminPanel({ currentUser, onLogout }) {
   const [open, setOpen] = useState(false);
   const [users, setUsers] = useState(adminSeedUsers.map(normalizeAccountPermissions));
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState("");
   const [draft, setDraft] = useState(defaultAccountDraft);
+  const [passwordDraft, setPasswordDraft] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [resetDrafts, setResetDrafts] = useState({});
 
   useEffect(() => {
     if (!open || useLocalPreview) return;
@@ -3159,6 +3315,14 @@ function AdminPanel({ currentUser }) {
   if (!useLocalPreview && currentUser?.role !== "admin") return null;
 
   async function saveUser() {
+    setError("");
+    setNotice("");
+
+    if (!draft.password || draft.password.length < 8) {
+      setError("初始密碼至少需要 8 碼");
+      return;
+    }
+
     const next = normalizeAccountPermissions({
       ...draft,
       id: `user-${Date.now()}`,
@@ -3166,28 +3330,33 @@ function AdminPanel({ currentUser }) {
       email: draft.email || `user-${Date.now()}@example.com`,
     });
 
-    setError("");
-
     if (useLocalPreview) {
       setUsers([next, ...users]);
       setDraft(defaultAccountDraft());
+      setNotice("已新增預覽帳號");
       return;
     }
 
     try {
+      setBusy("create-user");
       const data = await apiFetch("/api/users", {
         method: "POST",
         body: JSON.stringify(next),
       });
       setUsers([normalizeAccountPermissions(data.user), ...users]);
       setDraft(defaultAccountDraft());
+      setNotice("帳號已新增");
     } catch (err) {
       setError(err.message);
+    } finally {
+      setBusy("");
     }
   }
 
   async function updatePermission(user, patch) {
     if (user.role === "admin") return;
+    setError("");
+    setNotice("");
     const updated = normalizeAccountPermissions({ ...user, ...patch });
     setUsers(users.map((item) => (item.id === user.id ? updated : item)));
 
@@ -3204,10 +3373,80 @@ function AdminPanel({ currentUser }) {
     }
   }
 
+  async function changeOwnPassword() {
+    setError("");
+    setNotice("");
+
+    if (passwordDraft.newPassword.length < 8) {
+      setError("新密碼至少需要 8 碼");
+      return;
+    }
+    if (passwordDraft.newPassword !== passwordDraft.confirmPassword) {
+      setError("兩次輸入的新密碼不一致");
+      return;
+    }
+
+    if (useLocalPreview) {
+      setPasswordDraft({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setNotice("本機預覽已模擬更新密碼");
+      return;
+    }
+
+    try {
+      setBusy("change-password");
+      await apiFetch("/api/auth/password", {
+        method: "POST",
+        body: JSON.stringify({
+          currentPassword: passwordDraft.currentPassword,
+          newPassword: passwordDraft.newPassword,
+        }),
+      });
+      setPasswordDraft({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setNotice("密碼已更新，下次登入請使用新密碼");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function resetUserPassword(user) {
+    const password = resetDrafts[user.id] || "";
+    setError("");
+    setNotice("");
+
+    if (password.length < 8) {
+      setError("重設密碼至少需要 8 碼");
+      return;
+    }
+
+    if (useLocalPreview) {
+      setResetDrafts({ ...resetDrafts, [user.id]: "" });
+      setNotice(`已模擬重設 ${user.email} 的密碼`);
+      return;
+    }
+
+    try {
+      setBusy(`reset-${user.id}`);
+      await apiFetch(`/api/users/${user.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ password }),
+      });
+      setResetDrafts({ ...resetDrafts, [user.id]: "" });
+      setNotice(`已重設 ${user.email} 的密碼`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function removeUser(user) {
     if (user.role === "admin") return;
     if (!window.confirm(`確定刪除帳號「${user.email}」？`)) return;
 
+    setError("");
+    setNotice("");
     setUsers(users.filter((item) => item.id !== user.id));
 
     if (useLocalPreview) return;
@@ -3257,8 +3496,72 @@ function AdminPanel({ currentUser }) {
                 {error}
               </div>
             ) : null}
+            {notice ? (
+              <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                {notice}
+              </div>
+            ) : null}
+
+            <div className="mb-4 rounded-2xl border p-4">
+              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+                <div>
+                  <h3 className="font-bold">目前帳號設定</h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {currentUser?.name || "使用者"}｜{currentUser?.email || "未登入"}
+                  </p>
+                </div>
+                <Button type="button" variant="outline" onClick={onLogout}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  登出帳號
+                </Button>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <Input
+                  type="password"
+                  value={passwordDraft.currentPassword}
+                  onChange={(value) =>
+                    setPasswordDraft({ ...passwordDraft, currentPassword: value })
+                  }
+                  ph="目前密碼"
+                />
+                <Input
+                  type="password"
+                  value={passwordDraft.newPassword}
+                  onChange={(value) =>
+                    setPasswordDraft({ ...passwordDraft, newPassword: value })
+                  }
+                  ph="新密碼，至少 8 碼"
+                />
+                <Input
+                  type="password"
+                  value={passwordDraft.confirmPassword}
+                  onChange={(value) =>
+                    setPasswordDraft({ ...passwordDraft, confirmPassword: value })
+                  }
+                  ph="再次輸入新密碼"
+                />
+              </div>
+              <div className="mt-3 flex justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={changeOwnPassword}
+                  disabled={busy === "change-password"}
+                >
+                  {busy === "change-password" ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="mr-2 h-4 w-4" />
+                  )}
+                  更新密碼
+                </Button>
+              </div>
+            </div>
 
             <div className="grid gap-3 rounded-2xl bg-slate-50 p-4 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <h3 className="font-bold">新增帳號</h3>
+              </div>
               <Input
                 value={draft.name}
                 onChange={(value) => setDraft({ ...draft, name: value })}
@@ -3308,8 +3611,12 @@ function AdminPanel({ currentUser }) {
                 開啟編輯
               </label>
               <div className="md:col-span-2">
-                <Button type="button" onClick={saveUser}>
-                  <Plus className="mr-2 h-4 w-4" />
+                <Button type="button" onClick={saveUser} disabled={busy === "create-user"}>
+                  {busy === "create-user" ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="mr-2 h-4 w-4" />
+                  )}
                   新增帳號
                 </Button>
               </div>
@@ -3368,6 +3675,29 @@ function AdminPanel({ currentUser }) {
                       />
                       編輯
                     </label>
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
+                    <Input
+                      type="password"
+                      value={resetDrafts[user.id] || ""}
+                      onChange={(value) =>
+                        setResetDrafts({ ...resetDrafts, [user.id]: value })
+                      }
+                      ph="重設密碼，至少 8 碼"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => resetUserPassword(user)}
+                      disabled={busy === `reset-${user.id}`}
+                    >
+                      {busy === `reset-${user.id}` ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <ShieldCheck className="mr-2 h-4 w-4" />
+                      )}
+                      重設密碼
+                    </Button>
                   </div>
                 </div>
                 );
@@ -3517,7 +3847,7 @@ export default function App() {
   if (!p) {
     return (
       <>
-        <AdminPanel currentUser={auth.user} />
+        <AdminPanel currentUser={auth.user} onLogout={handleLogout} />
         <ProjectSelect
           onLogout={handleLogout}
           onSelect={(project) => {
@@ -3535,7 +3865,7 @@ export default function App() {
 
   return (
     <>
-      <AdminPanel currentUser={auth.user} />
+      <AdminPanel currentUser={auth.user} onLogout={handleLogout} />
       <div className="min-h-screen bg-slate-50 text-slate-900">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4 lg:flex-row">
         <aside className="lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:w-72">
