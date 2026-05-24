@@ -1,6 +1,6 @@
-import { deleteProject, ensureSchema } from "../_lib/db.js";
-import { ApiError, json, jsonError, methodNotAllowed } from "../_lib/http.js";
-import { requirePermission } from "../_lib/permissions.js";
+import { deleteProject, ensureSchema } from "../../_lib/db.js";
+import { ApiError, json, jsonError, methodNotAllowed } from "../../_lib/http.js";
+import { requirePermission } from "../../_lib/permissions.js";
 
 export default {
   async fetch(request) {
