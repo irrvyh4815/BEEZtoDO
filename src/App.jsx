@@ -811,17 +811,37 @@ function LoadingScreen() {
   );
 }
 
+function AccordionSection({ title, desc, meta, open, onToggle, children }) {
+  return (
+    <div className="rounded-2xl border bg-white">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-3 p-4 text-left hover:bg-slate-50"
+      >
+        <span className="min-w-0">
+          <span className="block font-bold text-slate-900">{title}</span>
+          {desc ? <span className="mt-1 block text-sm text-slate-500">{desc}</span> : null}
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          {meta ? <Badge>{meta}</Badge> : null}
+          <ChevronRight
+            className={`h-5 w-5 text-slate-500 transition ${open ? "rotate-90" : ""}`}
+          />
+        </span>
+      </button>
+      {open ? <div className="border-t p-4">{children}</div> : null}
+    </div>
+  );
+}
+
 function LoginScreen({ onLogin }) {
   const [email, setEmail] = useState("admin@eztodo.local");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const loginHighlights = [
-    "工地資料、合約、請款與施工日報集中管理",
-    "缺失改善、工項 Memo、待辦事項可依工地追蹤",
-    "預定進度可用甘特圖檢視工種與日期安排",
-    "管理員可控管帳號、閱覽權限與編輯權限",
-  ];
+  const loginTags = ["工地管理", "施工日報", "廠商請款", "缺失追蹤", "甘特圖", "權限控管"];
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -845,21 +865,40 @@ function LoginScreen({ onLogin }) {
     <Shell full>
       <div className="mx-auto grid min-h-[calc(100vh-2rem)] max-w-5xl items-center gap-6 lg:grid-cols-[1fr_420px]">
         <div className="rounded-3xl bg-slate-900 p-8 text-white">
-          <div className="mb-8 inline-flex rounded-2xl bg-white/10 p-3">
-            <ShieldCheck className="h-8 w-8" />
+          <div className="mb-8 flex items-center justify-between gap-4">
+            <div className="inline-flex rounded-2xl bg-white/10 p-3">
+              <ShieldCheck className="h-8 w-8" />
+            </div>
+            <p className="text-right text-sm font-medium text-slate-300">製作團隊：R3nault</p>
           </div>
-          <p className="text-sm font-medium text-slate-300">製作團隊：R3nault</p>
-          <h1 className="mt-3 text-3xl font-bold">EZtoDO工程管理程式</h1>
-          <p className="mt-3 max-w-xl text-sm leading-6 text-slate-300">
-            專為工程案場日常管理整理的工作平台，將工地進度、廠商資料、
-            表單紀錄與權限管理整合在同一套介面中。
+          <p className="text-sm font-medium text-slate-300">工程案場管理，一套掌握</p>
+          <h1 className="mt-3 max-w-2xl text-3xl font-bold leading-tight sm:text-4xl">
+            EZtoDO工程管理程式
+          </h1>
+          <p className="mt-4 max-w-xl text-base leading-7 text-slate-200">
+            從工地進度、廠商合約、請款節點到缺失改善，把每天散落在訊息、
+            表單與照片裡的工程資訊，整理成可追蹤、可查找、可交接的工作流。
           </p>
-          <div className="mt-6 grid gap-3">
-            {loginHighlights.map((item) => (
-              <div key={item} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100">
+          <div className="mt-6 flex flex-wrap gap-2">
+            {loginTags.map((item) => (
+              <span key={item} className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-slate-100">
                 {item}
-              </div>
+              </span>
             ))}
+          </div>
+          <div className="mt-8 grid gap-3 sm:grid-cols-3">
+            <div>
+              <p className="text-2xl font-bold">01</p>
+              <p className="mt-1 text-xs leading-5 text-slate-300">工地資料集中，避免多案場紀錄混在一起。</p>
+            </div>
+            <div>
+              <p className="text-2xl font-bold">02</p>
+              <p className="mt-1 text-xs leading-5 text-slate-300">請款、Memo、待辦與缺失都能依工地追蹤。</p>
+            </div>
+            <div>
+              <p className="text-2xl font-bold">03</p>
+              <p className="mt-1 text-xs leading-5 text-slate-300">管理員可配置帳號權限，保留閱覽與編輯界線。</p>
+            </div>
           </div>
         </div>
 
@@ -905,7 +944,7 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-function ProjectSelect({ onSelect, onLogout }) {
+function ProjectSelect({ onSelect }) {
   const [mode, setMode] = useState("list");
   const [list, setList] = useState(useLocalPreview ? previewProjects : []);
   const [query, setQuery] = useState("");
@@ -1016,12 +1055,6 @@ function ProjectSelect({ onSelect, onLogout }) {
               後續日報、合約、請款、缺失與照片都會歸到此工地。
             </p>
           </div>
-          {!useLocalPreview ? (
-            <Button type="button" variant="outline" onClick={onLogout}>
-              <LogOut className="mr-2 h-4 w-4" />
-              登出
-            </Button>
-          ) : null}
         </div>
         {error ? (
           <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -1103,12 +1136,6 @@ function ProjectSelect({ onSelect, onLogout }) {
           <h1 className="text-3xl font-bold">請先選擇工地</h1>
           <p className="mt-2 text-sm text-slate-300">先選工地，避免多案場資料混在一起。</p>
         </div>
-        {!useLocalPreview ? (
-          <Button type="button" variant="outline" onClick={onLogout}>
-            <LogOut className="mr-2 h-4 w-4" />
-            登出
-          </Button>
-        ) : null}
       </div>
       <div className="mb-4 flex gap-3 rounded-2xl border bg-white p-3">
         <Search className="h-5 w-5 text-slate-400" />
@@ -3305,6 +3332,12 @@ function AdminPanel({ currentUser, onLogout }) {
   const [draft, setDraft] = useState(defaultAccountDraft);
   const [profileName, setProfileName] = useState(currentUser?.name || "");
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [sections, setSections] = useState({
+    account: false,
+    create: false,
+    users: true,
+  });
+  const [openUserId, setOpenUserId] = useState("");
   const [passwordDraft, setPasswordDraft] = useState({
     currentPassword: "",
     newPassword: "",
@@ -3334,6 +3367,10 @@ function AdminPanel({ currentUser, onLogout }) {
   }, [open]);
 
   if (!useLocalPreview && currentUser?.role !== "admin") return null;
+
+  function toggleSection(section) {
+    setSections((current) => ({ ...current, [section]: !current[section] }));
+  }
 
   async function saveUser() {
     setError("");
@@ -3528,7 +3565,7 @@ function AdminPanel({ currentUser, onLogout }) {
               <div>
                 <h2 className="text-lg font-bold">帳號與權限管理</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  目前管理者：{currentUser?.name || "管理員"}
+                  {users.length} 個帳號｜目前管理者：{currentUser?.name || "管理員"}
                 </p>
               </div>
               <button
@@ -3553,186 +3590,211 @@ function AdminPanel({ currentUser, onLogout }) {
               </div>
             ) : null}
 
-            <div className="mb-4 rounded-2xl border p-4">
-              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-                <div>
-                  <h3 className="font-bold">目前帳號設定</h3>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {currentUser?.name || "使用者"}｜{currentUser?.email || "未登入"}
-                  </p>
-                </div>
-                <Button type="button" variant="outline" onClick={onLogout} className="w-full sm:w-auto">
-                  <LogOut className="mr-2 h-4 w-4" />
-                  登出帳號
-                </Button>
-              </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
-                <Input
-                  value={profileName}
-                  onChange={setProfileName}
-                  ph="暱稱"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={saveProfileName}
-                  disabled={busy === "profile-name"}
-                >
-                  {busy === "profile-name" ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="mr-2 h-4 w-4" />
-                  )}
-                  儲存暱稱
-                </Button>
-              </div>
-              <div className="mt-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setPasswordOpen(!passwordOpen)}
-                  className="w-full sm:w-auto"
-                >
-                  <ShieldCheck className="mr-2 h-4 w-4" />
-                  {passwordOpen ? "收合密碼變更" : "變更密碼"}
-                </Button>
-              </div>
-              {passwordOpen ? (
-                <div className="mt-4 rounded-2xl bg-slate-50 p-4">
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <Input
-                      type="password"
-                      value={passwordDraft.currentPassword}
-                      onChange={(value) =>
-                        setPasswordDraft({ ...passwordDraft, currentPassword: value })
-                      }
-                      ph="目前密碼"
-                    />
-                    <Input
-                      type="password"
-                      value={passwordDraft.newPassword}
-                      onChange={(value) =>
-                        setPasswordDraft({ ...passwordDraft, newPassword: value })
-                      }
-                      ph="新密碼，至少 8 碼"
-                    />
-                    <Input
-                      type="password"
-                      value={passwordDraft.confirmPassword}
-                      onChange={(value) =>
-                        setPasswordDraft({ ...passwordDraft, confirmPassword: value })
-                      }
-                      ph="再次輸入新密碼"
-                    />
+            <div className="grid gap-3">
+              <AccordionSection
+                title="目前帳號設定"
+                desc={`${currentUser?.name || "使用者"}｜${currentUser?.email || "未登入"}`}
+                open={sections.account}
+                onToggle={() => toggleSection("account")}
+              >
+                <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+                  <div>
+                    <h3 className="font-bold">個人設定</h3>
+                    <p className="mt-1 text-sm text-slate-500">
+                      修改暱稱、變更密碼或登出目前帳號。
+                    </p>
                   </div>
-                  <div className="mt-3 flex justify-end">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={changeOwnPassword}
-                      disabled={busy === "change-password"}
-                    >
-                      {busy === "change-password" ? (
+                  <Button type="button" variant="outline" onClick={onLogout} className="w-full sm:w-auto">
+                    <LogOut className="mr-2 h-4 w-4" />
+                    登出帳號
+                  </Button>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
+                  <Input
+                    value={profileName}
+                    onChange={setProfileName}
+                    ph="暱稱"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={saveProfileName}
+                    disabled={busy === "profile-name"}
+                  >
+                    {busy === "profile-name" ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="mr-2 h-4 w-4" />
+                    )}
+                    儲存暱稱
+                  </Button>
+                </div>
+                <div className="mt-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setPasswordOpen(!passwordOpen)}
+                    className="w-full sm:w-auto"
+                  >
+                    <ShieldCheck className="mr-2 h-4 w-4" />
+                    {passwordOpen ? "收合密碼變更" : "變更密碼"}
+                  </Button>
+                </div>
+                {passwordOpen ? (
+                  <div className="mt-4 rounded-2xl bg-slate-50 p-4">
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <Input
+                        type="password"
+                        value={passwordDraft.currentPassword}
+                        onChange={(value) =>
+                          setPasswordDraft({ ...passwordDraft, currentPassword: value })
+                        }
+                        ph="目前密碼"
+                      />
+                      <Input
+                        type="password"
+                        value={passwordDraft.newPassword}
+                        onChange={(value) =>
+                          setPasswordDraft({ ...passwordDraft, newPassword: value })
+                        }
+                        ph="新密碼，至少 8 碼"
+                      />
+                      <Input
+                        type="password"
+                        value={passwordDraft.confirmPassword}
+                        onChange={(value) =>
+                          setPasswordDraft({ ...passwordDraft, confirmPassword: value })
+                        }
+                        ph="再次輸入新密碼"
+                      />
+                    </div>
+                    <div className="mt-3 flex justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={changeOwnPassword}
+                        disabled={busy === "change-password"}
+                      >
+                        {busy === "change-password" ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="mr-2 h-4 w-4" />
+                        )}
+                        更新密碼
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+              </AccordionSection>
+
+              <AccordionSection
+                title="新增帳號"
+                desc="建立新使用者並設定初始權限"
+                meta={draft.role === "admin" ? "管理員" : "一般帳號"}
+                open={sections.create}
+                onToggle={() => toggleSection("create")}
+              >
+                <div className="grid gap-3 rounded-2xl bg-slate-50 p-4 md:grid-cols-2">
+                  <Input
+                    value={draft.name}
+                    onChange={(value) => setDraft({ ...draft, name: value })}
+                    ph="暱稱"
+                  />
+                  <Input
+                    value={draft.email}
+                    onChange={(value) => setDraft({ ...draft, email: value })}
+                    ph="Email 帳號"
+                  />
+                  <Input
+                    type="password"
+                    value={draft.password}
+                    onChange={(value) => setDraft({ ...draft, password: value })}
+                    ph="初始密碼"
+                  />
+                  <select
+                    value={draft.role}
+                    onChange={(event) =>
+                      setDraft(normalizeAccountPermissions({ ...draft, role: event.target.value }))
+                    }
+                    className="w-full rounded-xl border bg-white px-3 py-2 outline-none"
+                  >
+                    <option value="member">一般帳號</option>
+                    <option value="admin">管理員</option>
+                  </select>
+                  <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={draft.role === "admin" || draft.canView}
+                      disabled={draft.role === "admin"}
+                      onChange={(event) =>
+                        setDraft(normalizeAccountPermissions({ ...draft, canView: event.target.checked }))
+                      }
+                    />
+                    開啟閱覽
+                  </label>
+                  <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={draft.role === "admin" || draft.canEdit}
+                      disabled={draft.role === "admin" || !draft.canView}
+                      onChange={(event) =>
+                        setDraft(normalizeAccountPermissions({ ...draft, canEdit: event.target.checked }))
+                      }
+                    />
+                    開啟編輯
+                  </label>
+                  <div className="md:col-span-2">
+                    <Button type="button" onClick={saveUser} disabled={busy === "create-user"}>
+                      {busy === "create-user" ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       ) : (
-                        <ShieldCheck className="mr-2 h-4 w-4" />
+                        <Plus className="mr-2 h-4 w-4" />
                       )}
-                      更新密碼
+                      新增帳號
                     </Button>
                   </div>
                 </div>
-              ) : null}
-            </div>
+              </AccordionSection>
 
-            <div className="grid gap-3 rounded-2xl bg-slate-50 p-4 md:grid-cols-2">
-              <div className="md:col-span-2">
-                <h3 className="font-bold">新增帳號</h3>
-              </div>
-              <Input
-                value={draft.name}
-                onChange={(value) => setDraft({ ...draft, name: value })}
-                ph="暱稱"
-              />
-              <Input
-                value={draft.email}
-                onChange={(value) => setDraft({ ...draft, email: value })}
-                ph="Email 帳號"
-              />
-              <Input
-                type="password"
-                value={draft.password}
-                onChange={(value) => setDraft({ ...draft, password: value })}
-                ph="初始密碼"
-              />
-              <select
-                value={draft.role}
-                onChange={(event) =>
-                  setDraft(normalizeAccountPermissions({ ...draft, role: event.target.value }))
-                }
-                className="w-full rounded-xl border bg-white px-3 py-2 outline-none"
+              <AccordionSection
+                title="帳號列表"
+                desc="點開單一帳號後再調整角色、權限或密碼"
+                meta={`${users.length} 個帳號`}
+                open={sections.users}
+                onToggle={() => toggleSection("users")}
               >
-                <option value="member">一般帳號</option>
-                <option value="admin">管理員</option>
-              </select>
-              <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={draft.role === "admin" || draft.canView}
-                  disabled={draft.role === "admin"}
-                  onChange={(event) =>
-                    setDraft(normalizeAccountPermissions({ ...draft, canView: event.target.checked }))
-                  }
-                />
-                開啟閱覽
-              </label>
-              <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={draft.role === "admin" || draft.canEdit}
-                  disabled={draft.role === "admin" || !draft.canView}
-                  onChange={(event) =>
-                    setDraft(normalizeAccountPermissions({ ...draft, canEdit: event.target.checked }))
-                  }
-                />
-                開啟編輯
-              </label>
-              <div className="md:col-span-2">
-                <Button type="button" onClick={saveUser} disabled={busy === "create-user"}>
-                  {busy === "create-user" ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Plus className="mr-2 h-4 w-4" />
-                  )}
-                  新增帳號
-                </Button>
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-3">
+                <div className="grid gap-3">
               {users.map((user) => {
                 const isAdmin = user.role === "admin";
+                const userOpen = openUserId === user.id;
                 return (
                 <div key={user.id} className="rounded-2xl border p-4">
                   <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-                    <div>
+                    <button
+                      type="button"
+                      onClick={() => setOpenUserId(userOpen ? "" : user.id)}
+                      className="min-w-0 flex-1 text-left"
+                      aria-expanded={userOpen}
+                    >
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="font-bold">{user.name}</h3>
                         <Badge>{isAdmin ? "管理員" : "一般帳號"}</Badge>
                         {isAdmin ? <Badge>最高權限</Badge> : null}
+                        {!isAdmin ? <Badge>{user.canEdit ? "可編輯" : user.canView ? "僅閱覽" : "未開放"}</Badge> : null}
                       </div>
                       <p className="mt-1 text-sm text-slate-500">{user.email}</p>
-                    </div>
-                    <Button
+                    </button>
+                    <button
                       type="button"
-                      variant="outline"
-                      onClick={() => removeUser(user)}
-                      disabled={isAdmin}
-                      className="h-8 rounded-lg px-2 text-xs text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      onClick={() => setOpenUserId(userOpen ? "" : user.id)}
+                      className="flex items-center justify-center rounded-lg p-2 text-slate-500 hover:bg-slate-100"
+                      aria-label={userOpen ? "收合帳號設定" : "展開帳號設定"}
                     >
-                      <Trash2 className="mr-1 h-3.5 w-3.5" />
-                      刪除
-                    </Button>
+                      <ChevronRight className={`h-5 w-5 transition ${userOpen ? "rotate-90" : ""}`} />
+                    </button>
                   </div>
+                  {userOpen ? (
+                  <>
                   <div className="mt-3 grid gap-2 sm:grid-cols-3">
                     <select
                       value={user.role}
@@ -3785,9 +3847,25 @@ function AdminPanel({ currentUser, onLogout }) {
                       重設密碼
                     </Button>
                   </div>
+                  <div className="mt-3 flex justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => removeUser(user)}
+                      disabled={isAdmin}
+                      className="h-8 rounded-lg px-2 text-xs text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Trash2 className="mr-1 h-3.5 w-3.5" />
+                      刪除帳號
+                    </Button>
+                  </div>
+                  </>
+                  ) : null}
                 </div>
                 );
               })}
+                </div>
+              </AccordionSection>
             </div>
           </div>
         </div>
@@ -3935,7 +4013,6 @@ export default function App() {
       <>
         <AdminPanel currentUser={auth.user} onLogout={handleLogout} />
         <ProjectSelect
-          onLogout={handleLogout}
           onSelect={(project) => {
             setP(project);
             setActive("dashboard");
