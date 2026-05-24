@@ -816,6 +816,12 @@ function LoginScreen({ onLogin }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const loginHighlights = [
+    "工地資料、合約、請款與施工日報集中管理",
+    "缺失改善、工項 Memo、待辦事項可依工地追蹤",
+    "預定進度可用甘特圖檢視工種與日期安排",
+    "管理員可控管帳號、閱覽權限與編輯權限",
+  ];
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -842,10 +848,19 @@ function LoginScreen({ onLogin }) {
           <div className="mb-8 inline-flex rounded-2xl bg-white/10 p-3">
             <ShieldCheck className="h-8 w-8" />
           </div>
-          <h1 className="text-3xl font-bold">EZtoDO 工程管理</h1>
+          <p className="text-sm font-medium text-slate-300">製作團隊：R3nault</p>
+          <h1 className="mt-3 text-3xl font-bold">EZtoDO工程管理程式</h1>
           <p className="mt-3 max-w-xl text-sm leading-6 text-slate-300">
-            登入後即可管理工地、施工日報、請款、缺失改善與照片紀錄。
+            專為工程案場日常管理整理的工作平台，將工地進度、廠商資料、
+            表單紀錄與權限管理整合在同一套介面中。
           </p>
+          <div className="mt-6 grid gap-3">
+            {loginHighlights.map((item) => (
+              <div key={item} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100">
+                {item}
+              </div>
+            ))}
+          </div>
         </div>
 
         <Card>
@@ -3288,12 +3303,18 @@ function AdminPanel({ currentUser, onLogout }) {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState("");
   const [draft, setDraft] = useState(defaultAccountDraft);
+  const [profileName, setProfileName] = useState(currentUser?.name || "");
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const [passwordDraft, setPasswordDraft] = useState({
     currentPassword: "",
     newPassword: "",
     confirmPassword: "",
   });
   const [resetDrafts, setResetDrafts] = useState({});
+
+  useEffect(() => {
+    setProfileName(currentUser?.name || "");
+  }, [currentUser?.name]);
 
   useEffect(() => {
     if (!open || useLocalPreview) return;
@@ -3410,6 +3431,36 @@ function AdminPanel({ currentUser, onLogout }) {
     }
   }
 
+  async function saveProfileName() {
+    const name = profileName.trim();
+    setError("");
+    setNotice("");
+
+    if (!name) {
+      setError("請輸入暱稱");
+      return;
+    }
+
+    if (useLocalPreview) {
+      setNotice("本機預覽已模擬更新暱稱");
+      return;
+    }
+
+    try {
+      setBusy("profile-name");
+      const data = await apiFetch(`/api/users/${currentUser.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      });
+      setUsers(users.map((user) => (user.id === data.user.id ? data.user : user)));
+      setNotice("暱稱已更新，重新整理或下次登入後會套用到全站");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function resetUserPassword(user) {
     const password = resetDrafts[user.id] || "";
     setError("");
@@ -3510,52 +3561,87 @@ function AdminPanel({ currentUser, onLogout }) {
                     {currentUser?.name || "使用者"}｜{currentUser?.email || "未登入"}
                   </p>
                 </div>
-                <Button type="button" variant="outline" onClick={onLogout}>
+                <Button type="button" variant="outline" onClick={onLogout} className="w-full sm:w-auto">
                   <LogOut className="mr-2 h-4 w-4" />
                   登出帳號
                 </Button>
               </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
                 <Input
-                  type="password"
-                  value={passwordDraft.currentPassword}
-                  onChange={(value) =>
-                    setPasswordDraft({ ...passwordDraft, currentPassword: value })
-                  }
-                  ph="目前密碼"
+                  value={profileName}
+                  onChange={setProfileName}
+                  ph="暱稱"
                 />
-                <Input
-                  type="password"
-                  value={passwordDraft.newPassword}
-                  onChange={(value) =>
-                    setPasswordDraft({ ...passwordDraft, newPassword: value })
-                  }
-                  ph="新密碼，至少 8 碼"
-                />
-                <Input
-                  type="password"
-                  value={passwordDraft.confirmPassword}
-                  onChange={(value) =>
-                    setPasswordDraft({ ...passwordDraft, confirmPassword: value })
-                  }
-                  ph="再次輸入新密碼"
-                />
-              </div>
-              <div className="mt-3 flex justify-end">
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={changeOwnPassword}
-                  disabled={busy === "change-password"}
+                  onClick={saveProfileName}
+                  disabled={busy === "profile-name"}
                 >
-                  {busy === "change-password" ? (
+                  {busy === "profile-name" ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
-                    <ShieldCheck className="mr-2 h-4 w-4" />
+                    <Save className="mr-2 h-4 w-4" />
                   )}
-                  更新密碼
+                  儲存暱稱
                 </Button>
               </div>
+              <div className="mt-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setPasswordOpen(!passwordOpen)}
+                  className="w-full sm:w-auto"
+                >
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                  {passwordOpen ? "收合密碼變更" : "變更密碼"}
+                </Button>
+              </div>
+              {passwordOpen ? (
+                <div className="mt-4 rounded-2xl bg-slate-50 p-4">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <Input
+                      type="password"
+                      value={passwordDraft.currentPassword}
+                      onChange={(value) =>
+                        setPasswordDraft({ ...passwordDraft, currentPassword: value })
+                      }
+                      ph="目前密碼"
+                    />
+                    <Input
+                      type="password"
+                      value={passwordDraft.newPassword}
+                      onChange={(value) =>
+                        setPasswordDraft({ ...passwordDraft, newPassword: value })
+                      }
+                      ph="新密碼，至少 8 碼"
+                    />
+                    <Input
+                      type="password"
+                      value={passwordDraft.confirmPassword}
+                      onChange={(value) =>
+                        setPasswordDraft({ ...passwordDraft, confirmPassword: value })
+                      }
+                      ph="再次輸入新密碼"
+                    />
+                  </div>
+                  <div className="mt-3 flex justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={changeOwnPassword}
+                      disabled={busy === "change-password"}
+                    >
+                      {busy === "change-password" ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <ShieldCheck className="mr-2 h-4 w-4" />
+                      )}
+                      更新密碼
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="grid gap-3 rounded-2xl bg-slate-50 p-4 md:grid-cols-2">
@@ -3565,7 +3651,7 @@ function AdminPanel({ currentUser, onLogout }) {
               <Input
                 value={draft.name}
                 onChange={(value) => setDraft({ ...draft, name: value })}
-                ph="姓名"
+                ph="暱稱"
               />
               <Input
                 value={draft.email}
@@ -3894,16 +3980,6 @@ export default function App() {
                 >
                   返回主頁切換工地
                 </button>
-                {!useLocalPreview ? (
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="mt-3 flex items-center gap-1 text-xs text-slate-300 underline"
-                  >
-                    <LogOut className="h-3.5 w-3.5" />
-                    登出
-                  </button>
-                ) : null}
               </div>
               <button
                 type="button"
