@@ -1195,7 +1195,7 @@ function LoginScreen({ onLogin }) {
   const [mode, setMode] = useState("login");
   const [name, setName] = useState("");
   const [organizationName, setOrganizationName] = useState(organizationOptions[0]);
-  const [email, setEmail] = useState("admin@eztodo.local");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
@@ -5746,8 +5746,9 @@ export default function App() {
                       value={p.status}
                       onChange={(status) => setP({ ...p, status })}
                       options={projectStatusOptions}
+                      placeholder="請選擇工地狀態"
                       className="mt-2 space-y-2"
-                      selectClassName="select-on-dark border-white/15 bg-slate-900 text-sm text-white shadow-inner"
+                      selectClassName="project-status-select text-sm shadow-inner"
                       otherPlaceholder="請輸入自訂工地狀態"
                     />
                   </label>
