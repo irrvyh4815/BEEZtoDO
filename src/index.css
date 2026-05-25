@@ -30,3 +30,13 @@ select,
 textarea {
   font: inherit;
 }
+
+.select-on-dark {
+  color-scheme: dark;
+}
+
+.select-on-dark option,
+.select-on-dark optgroup {
+  background: #ffffff;
+  color: #0f172a;
+}

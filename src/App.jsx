@@ -5747,7 +5747,7 @@ export default function App() {
                       onChange={(status) => setP({ ...p, status })}
                       options={projectStatusOptions}
                       className="mt-2 space-y-2"
-                      selectClassName="border-white/10 bg-white/10 text-sm text-white"
+                      selectClassName="select-on-dark border-white/15 bg-slate-900 text-sm text-white shadow-inner"
                       otherPlaceholder="請輸入自訂工地狀態"
                     />
                   </label>
