@@ -39,18 +39,38 @@ function CardContent({ children, className = "" }) {
   return <div className={className}>{children}</div>;
 }
 
-function Button({ children, className = "", variant, ...props }) {
+function Button({ children, className = "", variant = "primary", size = "md", ...props }) {
   const base =
-    "inline-flex max-w-full items-center justify-center gap-1 whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60";
-  const style =
-    variant === "outline"
-      ? "bg-white text-slate-900 hover:bg-slate-100"
-      : "bg-slate-900 text-white hover:bg-slate-800";
+    "inline-flex max-w-full items-center justify-center gap-1 whitespace-nowrap border font-medium transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300";
+  const styles = {
+    primary: "border-slate-900 bg-slate-900 text-white hover:bg-slate-800",
+    outline: "border-slate-200 bg-white text-slate-900 hover:bg-slate-50",
+    subtle: "border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200",
+    danger: "border-red-200 bg-red-50 text-red-700 hover:bg-red-100 focus-visible:ring-red-200",
+    dangerGhost: "border-transparent bg-transparent text-red-600 hover:bg-red-50 focus-visible:ring-red-200",
+  };
+  const sizes = {
+    sm: "min-h-9 rounded-lg px-2.5 py-1.5 text-xs",
+    md: "min-h-11 rounded-xl px-3.5 py-2.5 text-sm",
+    icon: "h-10 w-10 rounded-lg p-0",
+  };
+  const style = styles[variant] || styles.primary;
+  const sizeClass = sizes[size] || sizes.md;
 
   return (
-    <button className={`${base} ${style} ${className}`} {...props}>
+    <button className={`${base} ${sizeClass} ${style} ${className}`} {...props}>
       {children}
     </button>
+  );
+}
+
+function ActionBar({ children, className = "" }) {
+  return (
+    <div
+      className={`flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end sm:gap-3 [&>button]:w-full sm:[&>button]:w-auto ${className}`}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -613,13 +633,14 @@ function VersionFooter({ className = "" }) {
   );
 }
 
-function Del({ label, onClick, icon = false }) {
+function Del({ label, onClick, icon = false, className = "" }) {
   return (
     <Button
       type="button"
-      variant="outline"
+      variant="danger"
+      size={icon ? "icon" : "sm"}
       onClick={() => del(label, onClick)}
-      className="h-8 rounded-lg px-2 text-xs text-red-600"
+      className={className}
       aria-label={`刪除 ${label}`}
     >
       <Trash2 className={icon ? "h-3.5 w-3.5" : "mr-1 h-3.5 w-3.5"} />
@@ -688,6 +709,7 @@ function ImageAttachments({
         <Button
           type="button"
           variant="outline"
+          className="w-full sm:w-auto"
           disabled={Number.isFinite(maxFiles) && value.length >= maxFiles}
           onClick={() => document.getElementById(inputId)?.click()}
         >
@@ -708,14 +730,16 @@ function ImageAttachments({
                 <p className="truncate text-sm font-medium">{image.name}</p>
                 <p className="text-xs text-slate-500">{Math.ceil(image.size / 1024)} KB</p>
               </div>
-              <button
+              <Button
                 type="button"
                 onClick={() => onChange(value.filter((item) => item.id !== image.id))}
-                className="rounded-lg p-2 text-red-600 hover:bg-red-50"
+                variant="dangerGhost"
+                size="icon"
+                className="shrink-0"
                 aria-label={`移除 ${image.name}`}
               >
                 <Trash2 className="h-4 w-4" />
-              </button>
+              </Button>
             </div>
           ))}
         </div>
@@ -1088,7 +1112,7 @@ function LoginScreen({ onLogin }) {
             <p className="mt-1 text-sm text-slate-500">
               {mode === "login"
                 ? "請輸入帳號密碼進入你的工地工作台。"
-                : "註冊後系統會寄送驗證信，完成信箱驗證後才能登入。"}
+                : "註冊帳號必須使用可收信的 Email；完成信箱驗證後，才可以進入操作頁面。"}
             </p>
             <form onSubmit={handleSubmit} className="mt-5 grid gap-4">
               {mode === "register" ? (
@@ -1117,9 +1141,11 @@ function LoginScreen({ onLogin }) {
                 </label>
               ) : null}
               <label>
-                <span className="text-sm font-medium">帳號</span>
+                <span className="text-sm font-medium">
+                  {mode === "register" ? "帳號 Email" : "帳號"}
+                </span>
                 <div className="mt-2">
-                  <Input value={email} onChange={setEmail} ph="email@example.com" />
+                  <Input value={email} onChange={setEmail} ph="email@example.com" type="email" />
                 </div>
               </label>
               <label>
@@ -1363,7 +1389,7 @@ function ProjectSelect({ onSelect }) {
               value={p.attachments}
               onChange={(attachments) => setP({ ...p, attachments })}
             />
-            <div className="flex justify-end gap-3 md:col-span-2">
+            <ActionBar className="md:col-span-2">
               <Button type="button" variant="outline" onClick={() => setMode("list")}>
                 取消
               </Button>
@@ -1374,7 +1400,7 @@ function ProjectSelect({ onSelect }) {
                 <Save className="mr-2 h-4 w-4" />
                 儲存並進入
               </Button>
-            </div>
+            </ActionBar>
           </CardContent>
         </Card>
         <VersionFooter className="mt-4" />
@@ -1490,6 +1516,7 @@ function ProjectSelect({ onSelect }) {
                 {project.canManage ? (
                   <Del
                     label={project.name}
+                    className="w-full"
                     onClick={() => removeProject(project)}
                   />
                 ) : (
@@ -2031,14 +2058,16 @@ function ProjectMembers({ project }) {
                     </p>
                   </div>
                   {canManage && member.role !== "owner" ? (
-                    <button
+                    <Button
                       type="button"
                       onClick={() => removeMember(member)}
-                      className="rounded-lg p-2 text-red-600 hover:bg-red-50"
+                      variant="dangerGhost"
+                      size="icon"
+                      className="shrink-0"
                       aria-label={`移除 ${member.email}`}
                     >
                       <Trash2 className="h-4 w-4" />
-                    </button>
+                    </Button>
                   ) : null}
                 </div>
                 {canManage && member.role !== "owner" ? (
@@ -2266,7 +2295,7 @@ function Claims({ p, claims, setClaims, allClaims = claims }) {
               value={draft.attachments}
               onChange={(attachments) => setDraft({ ...draft, attachments })}
             />
-            <div className="flex justify-end gap-3 md:col-span-2">
+            <ActionBar className="md:col-span-2">
               <Button type="button" variant="outline" onClick={() => setAdding(false)}>
                 取消
               </Button>
@@ -2274,7 +2303,7 @@ function Claims({ p, claims, setClaims, allClaims = claims }) {
                 <Save className="mr-2 h-4 w-4" />
                 儲存請款
               </Button>
-            </div>
+            </ActionBar>
           </CardContent>
         </Card>
       ) : null}
@@ -2476,7 +2505,7 @@ function Contracts({ p, items, onSave, onDelete }) {
               value={draft.attachments}
               onChange={(attachments) => setDraft({ ...draft, attachments })}
             />
-            <div className="flex justify-end gap-3 md:col-span-2">
+            <ActionBar className="md:col-span-2">
               <Button
                 type="button"
                 variant="outline"
@@ -2491,7 +2520,7 @@ function Contracts({ p, items, onSave, onDelete }) {
                 <Save className="mr-2 h-4 w-4" />
                 儲存合約
               </Button>
-            </div>
+            </ActionBar>
           </CardContent>
         </Card>
       ) : null}
@@ -2607,7 +2636,7 @@ function Memos({ p, items, onSave, onDelete }) {
               value={draft.attachments}
               onChange={(attachments) => setDraft({ ...draft, attachments })}
             />
-            <div className="flex justify-end gap-3 md:col-span-2">
+            <ActionBar className="md:col-span-2">
               <Button type="button" variant="outline" onClick={() => setAdding(false)}>
                 取消
               </Button>
@@ -2615,7 +2644,7 @@ function Memos({ p, items, onSave, onDelete }) {
                 <Save className="mr-2 h-4 w-4" />
                 儲存 Memo
               </Button>
-            </div>
+            </ActionBar>
           </CardContent>
         </Card>
       ) : null}
@@ -2686,7 +2715,7 @@ function Checklists({ p }) {
               value={draft.attachments}
               onChange={(attachments) => setDraft({ ...draft, attachments })}
             />
-            <div className="flex justify-end gap-3 md:col-span-2">
+            <ActionBar className="md:col-span-2">
               <Button type="button" variant="outline" onClick={() => setAdding(false)}>
                 取消
               </Button>
@@ -2694,7 +2723,7 @@ function Checklists({ p }) {
                 <Save className="mr-2 h-4 w-4" />
                 儲存檢核表
               </Button>
-            </div>
+            </ActionBar>
           </CardContent>
         </Card>
       ) : null}
@@ -2724,7 +2753,7 @@ function Checklists({ p }) {
                       <label>
                         <input type="checkbox" defaultChecked={i < s.done} /> {item}
                       </label>
-                      <button
+                      <Button
                         type="button"
                         onClick={() =>
                           del(item, () =>
@@ -2741,11 +2770,12 @@ function Checklists({ p }) {
                             ),
                           )
                         }
-                        className="text-red-600"
+                        variant="dangerGhost"
+                        size="icon"
                         aria-label={`刪除 ${item}`}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -2950,7 +2980,7 @@ function Daily({ p }) {
                   <p className="truncate text-sm font-medium">{paperReport.name}</p>
                   <p className="text-xs text-slate-500">{Math.ceil(paperReport.size / 1024)} KB</p>
                 </div>
-                <button
+                <Button
                   type="button"
                   onClick={() => {
                     setPaperReport(null);
@@ -2958,11 +2988,13 @@ function Daily({ p }) {
                     setAiMessage("");
                     setAiSummary(null);
                   }}
-                  className="rounded-lg p-2 text-red-600 hover:bg-red-50"
+                  variant="dangerGhost"
+                  size="icon"
+                  className="shrink-0"
                   aria-label={`移除 ${paperReport.name}`}
                 >
                   <Trash2 className="h-4 w-4" />
-                </button>
+                </Button>
               </div>
             ) : null}
             {aiMessage ? (
@@ -3084,12 +3116,12 @@ function Daily({ p }) {
             value={sitePhotos}
             onChange={setSitePhotos}
           />
-          <div className="flex justify-end md:col-span-2">
+          <ActionBar className="md:col-span-2">
             <Button type="button" onClick={saveDaily}>
               <Save className="mr-2 h-4 w-4" />
               確認並儲存日報
             </Button>
-          </div>
+          </ActionBar>
         </CardContent>
       </Card>
       {savedReports.length ? (
@@ -3137,13 +3169,14 @@ function Rows({ title, list, add, del: remove, render }) {
           <div key={x.id} className="rounded-2xl bg-slate-50 p-4">
             <div className="mb-3 flex justify-between">
               <b>紀錄 {i + 1}</b>
-              <button
+              <Button
                 type="button"
                 onClick={() => remove(x.id, i)}
-                className="rounded-md px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                variant="danger"
+                size="sm"
               >
                 刪除
-              </button>
+              </Button>
             </div>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{render(x)}</div>
           </div>
@@ -3267,7 +3300,7 @@ function Defects({ p }) {
               value={draft.attachments}
               onChange={(attachments) => setDraft({ ...draft, attachments })}
             />
-            <div className="flex justify-end gap-3 md:col-span-2">
+            <ActionBar className="md:col-span-2">
               <Button type="button" variant="outline" onClick={() => setAdding(false)}>
                 取消
               </Button>
@@ -3275,7 +3308,7 @@ function Defects({ p }) {
                 <Save className="mr-2 h-4 w-4" />
                 儲存缺失
               </Button>
-            </div>
+            </ActionBar>
           </CardContent>
         </Card>
       ) : null}
@@ -3436,7 +3469,7 @@ function Todos({ p, items, onSave, onDelete }) {
               value={draft.attachments}
               onChange={(attachments) => setDraft({ ...draft, attachments })}
             />
-            <div className="flex justify-end gap-3 md:col-span-2">
+            <ActionBar className="md:col-span-2">
               <Button
                 type="button"
                 variant="outline"
@@ -3451,7 +3484,7 @@ function Todos({ p, items, onSave, onDelete }) {
                 <Save className="mr-2 h-4 w-4" />
                 儲存待辦
               </Button>
-            </div>
+            </ActionBar>
           </CardContent>
         </Card>
       ) : null}
@@ -3634,7 +3667,7 @@ function Schedule({ p, items, onSave, onDelete }) {
               value={draft.attachments}
               onChange={(attachments) => setDraft({ ...draft, attachments })}
             />
-            <div className="flex justify-end gap-3 md:col-span-2">
+            <ActionBar className="md:col-span-2">
               <Button
                 type="button"
                 variant="outline"
@@ -3649,7 +3682,7 @@ function Schedule({ p, items, onSave, onDelete }) {
                 <Save className="mr-2 h-4 w-4" />
                 儲存並更新圖表
               </Button>
-            </div>
+            </ActionBar>
           </CardContent>
         </Card>
       ) : null}
@@ -4111,7 +4144,7 @@ function Placeholder({ title }) {
               value={draft.attachments}
               onChange={(attachments) => setDraft({ ...draft, attachments })}
             />
-            <div className="flex justify-end gap-3 md:col-span-2">
+            <ActionBar className="md:col-span-2">
               <Button type="button" variant="outline" onClick={() => setAdding(false)}>
                 取消
               </Button>
@@ -4119,7 +4152,7 @@ function Placeholder({ title }) {
                 <Save className="mr-2 h-4 w-4" />
                 儲存
               </Button>
-            </div>
+            </ActionBar>
           </CardContent>
         </Card>
       ) : null}
@@ -4532,7 +4565,7 @@ function AdminPanel({ currentUser, onLogout, onUserUpdate, open, onOpenChange })
                       修改暱稱、變更密碼或登出目前帳號。
                     </p>
                   </div>
-                  <Button type="button" variant="outline" onClick={onLogout} className="w-full sm:w-auto">
+                  <Button type="button" variant="danger" onClick={onLogout} className="w-full sm:w-auto">
                     <LogOut className="mr-2 h-4 w-4" />
                     登出帳號
                   </Button>
@@ -4596,7 +4629,7 @@ function AdminPanel({ currentUser, onLogout, onUserUpdate, open, onOpenChange })
                         ph="再次輸入新密碼"
                       />
                     </div>
-                    <div className="mt-3 flex justify-end">
+                    <ActionBar className="mt-3">
                       <Button
                         type="button"
                         variant="outline"
@@ -4610,7 +4643,7 @@ function AdminPanel({ currentUser, onLogout, onUserUpdate, open, onOpenChange })
                         )}
                         更新密碼
                       </Button>
-                    </div>
+                    </ActionBar>
                   </div>
                 ) : null}
               </AccordionSection>
@@ -4818,7 +4851,7 @@ function AdminPanel({ currentUser, onLogout, onUserUpdate, open, onOpenChange })
                     </Button>
                   </div>
                   {!isAdmin && !user.emailVerified ? (
-                    <div className="mt-3 flex justify-end">
+                    <ActionBar className="mt-3">
                       <Button
                         type="button"
                         variant="outline"
@@ -4832,20 +4865,21 @@ function AdminPanel({ currentUser, onLogout, onUserUpdate, open, onOpenChange })
                         )}
                         重寄驗證信
                       </Button>
-                    </div>
+                    </ActionBar>
                   ) : null}
-                  <div className="mt-3 flex justify-end">
+                  <ActionBar className="mt-3">
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="danger"
+                      size="sm"
                       onClick={() => removeUser(user)}
                       disabled={isAdmin}
-                      className="h-8 rounded-lg px-2 text-xs text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <Trash2 className="mr-1 h-3.5 w-3.5" />
                       刪除帳號
                     </Button>
-                  </div>
+                  </ActionBar>
                   </>
                   ) : null}
                 </div>
@@ -4959,7 +4993,7 @@ function AdminPanel({ currentUser, onLogout, onUserUpdate, open, onOpenChange })
                 </div>
               ) : null}
 
-              <Button type="button" variant="outline" onClick={onLogout}>
+              <Button type="button" variant="danger" onClick={onLogout}>
                 <LogOut className="mr-2 h-4 w-4" />
                 登出帳號
               </Button>
