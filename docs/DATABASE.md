@@ -22,6 +22,7 @@
 | `email_verification_token_hash` | `text` | 驗證 token 的 SHA-256 hash |
 | `email_verification_expires_at` | `timestamptz` | 驗證連結失效時間 |
 | `email_verification_sent_at` | `timestamptz` | 最近一次寄送驗證信時間 |
+| `last_login_at` | `timestamptz` | 最近一次成功登入時間 |
 | `created_at` | `timestamptz` | 建立時間 |
 
 `admin` 永遠視為最高權限，後端會強制 `can_view = true`、`can_edit = true`，且不可透過權限管理降權或刪除。`member` 才會依照 `can_view` / `can_edit` 控制閱覽與編輯；若 `can_view = false`，後端也會一併關閉 `can_edit`。
@@ -319,6 +320,23 @@
 需管理員登入。
 
 `GET /api/users`
+
+回傳所有註冊帳號，僅系統管理員可使用。每筆帳號會包含：
+
+```json
+{
+  "id": "user-id",
+  "email": "site-manager@example.com",
+  "name": "王主任",
+  "role": "member",
+  "canView": true,
+  "canEdit": false,
+  "emailVerified": true,
+  "createdProjectCount": 2,
+  "lastLoginAt": "2026-05-25T10:30:00.000Z",
+  "createdAt": "2026-05-24T08:00:00.000Z"
+}
+```
 
 `POST /api/users`
 

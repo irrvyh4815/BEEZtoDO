@@ -19,6 +19,7 @@ import {
   findUserByEmail,
   findUserById,
   insertUser,
+  markUserLogin,
   updateUserPassword,
   verifyEmailToken,
 } from "../_lib/db.js";
@@ -78,8 +79,10 @@ async function login(request) {
     throw new ApiError(403, "請先完成信箱驗證，再登入系統。", "EMAIL_NOT_VERIFIED");
   }
 
+  const loggedInUser = await markUserLogin(user.id);
+
   return json(
-    { user: publicUser(user) },
+    { user: publicUser(loggedInUser || user) },
     200,
     {
       "Set-Cookie": sessionCookie(createSessionToken(user), sessionMaxAgeSeconds()),

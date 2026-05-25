@@ -86,7 +86,7 @@ const mods = [
   ["photos", "照片中心"],
 ].map(([id, label]) => ({ id, label, icon: I[id] }));
 
-const APP_VERSION = "eztodo_26052502";
+const APP_VERSION = "eztodo_26052503";
 const SAMPLE_PROJECT_NAME = "範例工地：東區住宅新建工程";
 const DAILY_AI_SOURCE_MAX_BYTES = 3 * 1024 * 1024;
 
@@ -406,6 +406,19 @@ function parseDate(value) {
 
 function formatDate(value) {
   return value || "未設定";
+}
+
+function formatDateTime(value) {
+  if (!value) return "尚未登入";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("zh-TW", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function countWorkDays(startDate, endDate = new Date()) {
@@ -911,11 +924,15 @@ function AccordionSection({ title, desc, meta, open, onToggle, children }) {
 }
 
 function LoginScreen({ onLogin }) {
+  const [mode, setMode] = useState("login");
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("admin@eztodo.local");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [errorCode, setErrorCode] = useState("");
   const [resendNotice, setResendNotice] = useState("");
+  const [registerNotice, setRegisterNotice] = useState("");
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const loginTags = ["工地管理", "施工日報", "廠商請款", "缺失追蹤", "甘特圖", "照片附件"];
@@ -925,9 +942,38 @@ function LoginScreen({ onLogin }) {
     setError("");
     setErrorCode("");
     setResendNotice("");
+    setRegisterNotice("");
     setLoading(true);
 
     try {
+      if (mode === "register") {
+        if (!name.trim()) {
+          throw new Error("請輸入暱稱 / 姓名");
+        }
+        if (password.length < 8) {
+          throw new Error("密碼至少需要 8 碼");
+        }
+        if (password !== confirmPassword) {
+          throw new Error("兩次輸入的密碼不一致");
+        }
+
+        const data = await apiFetch("/api/auth/register", {
+          method: "POST",
+          body: JSON.stringify({ name, email, password }),
+        });
+
+        if (data.emailVerificationRequired) {
+          setRegisterNotice("註冊完成，驗證信已寄出。請先到信箱完成驗證後再登入。");
+          setMode("login");
+          setPassword("");
+          setConfirmPassword("");
+          return;
+        }
+
+        onLogin(data.user);
+        return;
+      }
+
       const data = await apiFetch("/api/auth/login", {
         method: "POST",
         body: JSON.stringify({ email, password }),
@@ -1003,12 +1049,50 @@ function LoginScreen({ onLogin }) {
 
         <Card>
           <CardContent className="p-6">
-            <h2 className="text-xl font-bold">管理員登入</h2>
+            <div className="flex rounded-2xl border bg-slate-50 p-1">
+              {[
+                ["login", "登入帳號"],
+                ["register", "註冊帳號"],
+              ].map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setMode(id);
+                    setError("");
+                    setErrorCode("");
+                    setResendNotice("");
+                    setRegisterNotice("");
+                  }}
+                  className={`flex-1 rounded-xl px-3 py-2 text-sm font-bold transition ${
+                    mode === id ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:bg-white"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <h2 className="mt-5 text-xl font-bold">
+              {mode === "login" ? "登入 EZtoDO" : "建立新帳號"}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {mode === "login"
+                ? "請輸入帳號密碼進入你的工地工作台。"
+                : "註冊後可建立自己的工地；若有信箱驗證，請先完成驗證再登入。"}
+            </p>
             <form onSubmit={handleSubmit} className="mt-5 grid gap-4">
+              {mode === "register" ? (
+                <label>
+                  <span className="text-sm font-medium">暱稱 / 姓名</span>
+                  <div className="mt-2">
+                    <Input value={name} onChange={setName} ph="例如：王主任" />
+                  </div>
+                </label>
+              ) : null}
               <label>
                 <span className="text-sm font-medium">帳號</span>
                 <div className="mt-2">
-                  <Input value={email} onChange={setEmail} ph="admin@eztodo.local" />
+                  <Input value={email} onChange={setEmail} ph="email@example.com" />
                 </div>
               </label>
               <label>
@@ -1018,10 +1102,23 @@ function LoginScreen({ onLogin }) {
                     type="password"
                     value={password}
                     onChange={setPassword}
-                    ph="請輸入管理員密碼"
+                    ph={mode === "login" ? "請輸入密碼" : "至少 8 碼"}
                   />
                 </div>
               </label>
+              {mode === "register" ? (
+                <label>
+                  <span className="text-sm font-medium">確認密碼</span>
+                  <div className="mt-2">
+                    <Input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={setConfirmPassword}
+                      ph="再次輸入密碼"
+                    />
+                  </div>
+                </label>
+              ) : null}
               {error ? (
                 <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                   {error}
@@ -1050,13 +1147,18 @@ function LoginScreen({ onLogin }) {
                   {resendNotice}
                 </div>
               ) : null}
+              {registerNotice ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                  {registerNotice}
+                </div>
+              ) : null}
               <Button type="submit" disabled={loading} className="mt-1">
                 {loading ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
                   <LogIn className="mr-2 h-4 w-4" />
                 )}
-                登入
+                {mode === "login" ? "登入" : "註冊帳號"}
               </Button>
             </form>
           </CardContent>
@@ -3730,6 +3832,15 @@ function Manual() {
   const versionNotes = [
     {
       version: APP_VERSION,
+      title: "獨立系統管理中心",
+      items: [
+        "右上角系統管理改為全頁管理中心，僅系統管理員可使用。",
+        "帳號管理新增搜尋、帳號總覽統計、建立工地數與最後登入時間。",
+        "點開帳號後可查看帳號建立時間、信箱驗證狀態並調整權限或重設密碼。",
+      ],
+    },
+    {
+      version: "eztodo_26052502",
       title: "多客戶工地隔離與共同管理",
       items: [
         "新增工地建立者與 project_members 成員權限模型。",
@@ -4016,6 +4127,7 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState("");
+  const [accountQuery, setAccountQuery] = useState("");
   const [draft, setDraft] = useState(defaultAccountDraft);
   const [profileName, setProfileName] = useState(currentUser?.name || "");
   const [passwordOpen, setPasswordOpen] = useState(false);
@@ -4069,6 +4181,18 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
   }, [open, onOpenChange]);
 
   if (!useLocalPreview && currentUser?.role !== "admin") return null;
+
+  const filteredUsers = users.filter((user) => {
+    const keyword = accountQuery.trim().toLowerCase();
+    if (!keyword) return true;
+    return [user.name, user.email, user.role, user.emailVerified ? "verified" : "unverified"]
+      .join(" ")
+      .toLowerCase()
+      .includes(keyword);
+  });
+  const totalProjects = users.reduce((total, user) => total + Number(user.createdProjectCount || 0), 0);
+  const verifiedCount = users.filter((user) => user.emailVerified).length;
+  const activeCount = users.filter((user) => user.lastLoginAt).length;
 
   function toggleSection(section) {
     setSections((current) => ({ ...current, [section]: !current[section] }));
@@ -4281,30 +4405,30 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
         className="fixed right-4 top-4 z-50 inline-flex items-center gap-2 rounded-full border bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-lg hover:bg-slate-50"
       >
         <ShieldCheck className="h-4 w-4" />
-        管理
+        系統管理
       </button>
 
       {open ? (
-        <div ref={panelRef} className="fixed right-4 top-16 z-50 w-[calc(100vw-2rem)] max-w-xl rounded-2xl border bg-white shadow-xl">
-          <div className="border-b p-4">
-            <div className="flex items-start justify-between gap-4">
+        <div ref={panelRef} className="fixed inset-0 z-50 overflow-auto bg-slate-50">
+          <div className="sticky top-0 z-10 border-b bg-white/95 p-4 shadow-sm backdrop-blur">
+            <div className="mx-auto flex max-w-7xl items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-bold">帳號與權限管理</h2>
+                <h2 className="text-2xl font-bold">系統管理中心</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  {users.length} 個帳號｜目前管理者：{currentUser?.name || "管理員"}
+                  僅最高權限系統管理員可使用｜目前管理者：{currentUser?.name || "管理員"}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => onOpenChange(false)}
-                className="rounded-lg px-2 py-1 text-sm text-slate-500 hover:bg-slate-100"
+                className="rounded-xl border bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
               >
-                關閉
+                返回系統
               </button>
             </div>
           </div>
 
-          <div className="max-h-[calc(100vh-6rem)] overflow-auto p-4">
+          <div className="mx-auto max-w-7xl p-4">
             {error ? (
               <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                 {error}
@@ -4315,6 +4439,30 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
                 {notice}
               </div>
             ) : null}
+
+            <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Stat title="註冊帳號" value={users.length} desc="系統內全部帳號" icon={UserRound} />
+              <Stat title="已驗證信箱" value={verifiedCount} desc="包含系統管理員" icon={ShieldCheck} />
+              <Stat title="有登入紀錄" value={activeCount} desc="依最後登入時間統計" icon={LogIn} />
+              <Stat title="建立工地" value={totalProjects} desc="所有帳號建立總數" icon={Building2} />
+            </div>
+
+            <Card className="mb-4">
+              <CardContent className="grid gap-3 p-4 lg:grid-cols-[1fr_auto]">
+                <div className="flex items-center gap-3 rounded-2xl border bg-slate-50 px-3 py-2">
+                  <Search className="h-5 w-5 text-slate-400" />
+                  <input
+                    value={accountQuery}
+                    onChange={(event) => setAccountQuery(event.target.value)}
+                    className="w-full bg-transparent text-sm outline-none"
+                    placeholder="搜尋暱稱、Email、角色或驗證狀態"
+                  />
+                </div>
+                <Button type="button" variant="outline" onClick={() => setAccountQuery("")}>
+                  清除搜尋
+                </Button>
+              </CardContent>
+            </Card>
 
             <div className="grid gap-3">
               <AccordionSection
@@ -4484,13 +4632,13 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
 
               <AccordionSection
                 title="帳號列表"
-                desc="點開單一帳號後再調整角色、權限或密碼"
-                meta={`${users.length} 個帳號`}
+                desc="搜尋、查看帳號建立工地數與最後登入時間，並調整角色、權限或密碼"
+                meta={`${filteredUsers.length}/${users.length} 個帳號`}
                 open={sections.users}
                 onToggle={() => toggleSection("users")}
               >
                 <div className="grid gap-3">
-              {users.map((user) => {
+              {filteredUsers.map((user) => {
                 const isAdmin = user.role === "admin";
                 const userOpen = openUserId === user.id;
                 return (
@@ -4512,6 +4660,9 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
                         ) : null}
                       </div>
                       <p className="mt-1 text-sm text-slate-500">{user.email}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        建立工地 {Number(user.createdProjectCount || 0)} 個｜最後登入：{formatDateTime(user.lastLoginAt)}
+                      </p>
                     </button>
                     <button
                       type="button"
@@ -4524,6 +4675,24 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
                   </div>
                   {userOpen ? (
                   <>
+                  <div className="mt-4 grid gap-2 rounded-2xl bg-slate-50 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">建立工地</p>
+                      <p className="mt-1 font-bold">{Number(user.createdProjectCount || 0)} 個</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">最後登入</p>
+                      <p className="mt-1 font-bold">{formatDateTime(user.lastLoginAt)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">建立帳號時間</p>
+                      <p className="mt-1 font-bold">{formatDateTime(user.createdAt)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">信箱驗證</p>
+                      <p className="mt-1 font-bold">{user.emailVerified ? "已驗證" : "尚未驗證"}</p>
+                    </div>
+                  </div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-3">
                     <select
                       value={user.role}

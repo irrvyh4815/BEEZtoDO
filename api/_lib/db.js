@@ -125,6 +125,8 @@ export function mapUser(row) {
     canEdit: isAdmin ? true : row.can_edit,
     emailVerified: isAdmin ? true : Boolean(row.email_verified),
     emailVerifiedAt: row.email_verified_at,
+    createdProjectCount: Number(row.created_project_count || 0),
+    lastLoginAt: row.last_login_at,
     createdAt: row.created_at,
   };
 }
@@ -275,6 +277,7 @@ async function initializeSchema() {
       email_verification_token_hash text,
       email_verification_expires_at timestamptz,
       email_verification_sent_at timestamptz,
+      last_login_at timestamptz,
       created_at timestamptz not null default now()
     )
   `);
@@ -286,6 +289,7 @@ async function initializeSchema() {
   await query("alter table users add column if not exists email_verification_token_hash text");
   await query("alter table users add column if not exists email_verification_expires_at timestamptz");
   await query("alter table users add column if not exists email_verification_sent_at timestamptz");
+  await query("alter table users add column if not exists last_login_at timestamptz");
   await query("update users set email_verified = true where email_verified is null");
   await query(
     "update users set email_verified_at = created_at where email_verified = true and email_verified_at is null",
@@ -461,9 +465,26 @@ export async function verifyEmailToken(token) {
 
 export async function listUsers() {
   const result = await query(
-    "select * from users order by role = 'admin' desc, created_at asc",
+    `select u.*,
+            count(p.id)::int as created_project_count
+     from users u
+     left join projects p on p.created_by = u.id
+     group by u.id
+     order by u.role = 'admin' desc, u.created_at asc`,
   );
   return result.rows.map(mapUser);
+}
+
+export async function markUserLogin(id) {
+  const result = await query(
+    `update users
+     set last_login_at = now()
+     where id = $1
+     returning *`,
+    [id],
+  );
+
+  return result.rows[0] ? mapUser(result.rows[0]) : null;
 }
 
 export async function updateUserPermissions(id, { role, canView, canEdit }) {
