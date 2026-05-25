@@ -3180,6 +3180,9 @@ function Daily({ p }) {
   const [aiStatus, setAiStatus] = useState("idle");
   const [aiMessage, setAiMessage] = useState("");
   const [aiSummary, setAiSummary] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [dateQuery, setDateQuery] = useState("");
+  const [openReportId, setOpenReportId] = useState("");
   const {
     items: savedReports,
     saveItem: saveDailyRecord,
@@ -3205,6 +3208,12 @@ function Daily({ p }) {
     setWork([{ id: Date.now(), ...empty.work }]);
     setMat([{ id: Date.now() + 1, ...empty.mat }]);
     setEq([{ id: Date.now() + 2, ...empty.eq }]);
+  }
+
+  function openDailyForm() {
+    resetDaily();
+    setAdding(true);
+    setOpenReportId("");
   }
 
   function selectPaperReport(event) {
@@ -3298,7 +3307,14 @@ function Daily({ p }) {
       status: next.weather,
     });
     resetDaily();
+    setAdding(false);
   }
+
+  const filteredReports = savedReports.filter((report) => {
+    const keyword = dateQuery.trim();
+    if (!keyword) return true;
+    return String(report.date || "").includes(keyword);
+  });
 
   return (
     <div>
@@ -3306,15 +3322,16 @@ function Daily({ p }) {
         title="施工日報紀錄"
         sub={`目前工地：${p.name}`}
         btn="新增日報"
-        onAdd={resetDaily}
+        onAdd={openDailyForm}
       />
       {dailyError ? (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {dailyError}
         </div>
       ) : null}
-      <Card>
-        <CardContent className="grid gap-4 p-5 md:grid-cols-2">
+      {adding ? (
+        <Card className="mb-4">
+          <CardContent className="grid gap-4 p-5 md:grid-cols-2">
           <div className="md:col-span-2 rounded-2xl border bg-white p-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0">
@@ -3504,11 +3521,48 @@ function Daily({ p }) {
             onChange={setSitePhotos}
           />
           <ActionBar className="md:col-span-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                resetDaily();
+                setAdding(false);
+              }}
+            >
+              取消
+            </Button>
             <Button type="button" onClick={saveDaily}>
               <Save className="mr-2 h-4 w-4" />
               確認並儲存日報
             </Button>
           </ActionBar>
+          </CardContent>
+        </Card>
+      ) : null}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h2 className="text-lg font-bold">已儲存日報</h2>
+              <p className="mt-1 text-sm text-slate-500">可依日期搜尋，並展開查看工班、材料、機具與照片附件。</p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+              <label>
+                <span className="text-xs font-medium text-slate-500">搜尋日期</span>
+                <div className="mt-1">
+                  <Input type="date" value={dateQuery} onChange={setDateQuery} />
+                </div>
+              </label>
+              <Button
+                type="button"
+                variant="outline"
+                className="self-end"
+                onClick={() => setDateQuery("")}
+              >
+                清除
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
       {dailyLoading ? (
@@ -3516,39 +3570,165 @@ function Daily({ p }) {
           讀取施工日報中
         </div>
       ) : null}
-      {savedReports.length ? (
+      {filteredReports.length ? (
         <div className="mt-4 grid gap-3">
-          {savedReports.map((report) => (
+          {filteredReports.map((report) => {
+            const isOpen = openReportId === report.id;
+            return (
             <Card key={report.id}>
-              <CardContent className="flex flex-col justify-between gap-3 p-4 sm:flex-row sm:items-center">
-                <div>
-                  <h3 className="font-bold">{report.date} 施工日報</h3>
-                  <p className="text-sm text-slate-500">
-                    天氣：{report.weather}｜工班 {report.workCount} 筆｜總人數 {report.workers}
-                  </p>
-                  <p className="text-sm text-slate-500">
-                    材料 {report.materialCount} 筆｜機具 {report.equipmentCount} 筆
-                  </p>
-                  {report.sourceAttachment ? (
-                    <div className="mt-2">
-                      <Badge>已附紙本日報來源</Badge>
+              <CardContent className="p-4">
+                <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                  <button
+                    type="button"
+                    onClick={() => setOpenReportId(isOpen ? "" : report.id)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-bold">{report.date} 施工日報</h3>
+                      <Badge>{isOpen ? "已展開" : "點擊查看"}</Badge>
                     </div>
-                  ) : null}
-                  <AttachmentSummary attachments={report.attachments} />
+                    <p className="mt-1 text-sm text-slate-500">
+                      天氣：{report.weather}｜工班 {report.workCount} 筆｜總人數 {report.workers}
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      材料 {report.materialCount} 筆｜機具 {report.equipmentCount} 筆
+                    </p>
+                    {report.sourceAttachment ? (
+                      <div className="mt-2">
+                        <Badge>已附紙本日報來源</Badge>
+                      </div>
+                    ) : null}
+                    <AttachmentSummary attachments={report.attachments} />
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setOpenReportId(isOpen ? "" : report.id)}
+                    >
+                      {isOpen ? "收合" : "查看詳情"}
+                    </Button>
+                    <Del icon label={`${report.date} 施工日報`} onClick={() => deleteDailyRecord(report.id)} />
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Badge>已儲存</Badge>
-                  <Del icon label={`${report.date} 施工日報`} onClick={() => deleteDailyRecord(report.id)} />
-                </div>
+                {isOpen ? <DailyReportDetails report={report} /> : null}
               </CardContent>
             </Card>
-          ))}
+            );
+          })}
         </div>
       ) : !dailyLoading ? (
         <div className="mt-4 rounded-2xl border border-dashed p-6 text-center text-sm text-slate-500">
-          尚無已儲存施工日報。
+          {savedReports.length ? "找不到符合日期的施工日報。" : "尚無已儲存施工日報。"}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function DailyReportDetails({ report }) {
+  return (
+    <div className="mt-4 grid gap-4 border-t pt-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-xl bg-slate-50 p-3">
+          <p className="text-xs text-slate-500">日期</p>
+          <p className="mt-1 font-bold">{report.date}</p>
+        </div>
+        <div className="rounded-xl bg-slate-50 p-3">
+          <p className="text-xs text-slate-500">天氣</p>
+          <p className="mt-1 font-bold">{report.weather}</p>
+        </div>
+        <div className="rounded-xl bg-slate-50 p-3">
+          <p className="text-xs text-slate-500">總人數</p>
+          <p className="mt-1 font-bold">{report.workers || 0}</p>
+        </div>
+        <div className="rounded-xl bg-slate-50 p-3">
+          <p className="text-xs text-slate-500">天氣備註</p>
+          <p className="mt-1 break-words font-bold">{report.weatherNote || "未填寫"}</p>
+        </div>
+      </div>
+      <DailyReportTable
+        title="施工工班"
+        rows={report.work || []}
+        columns={[
+          ["trade", "工班"],
+          ["workers", "人數"],
+          ["description", "施工項目"],
+          ["note", "備註"],
+        ]}
+      />
+      <DailyReportTable
+        title="材料使用 / 進場"
+        rows={report.materials || []}
+        columns={[
+          ["name", "材料"],
+          ["spec", "規格"],
+          ["quantity", "數量"],
+          ["unit", "單位"],
+          ["note", "備註"],
+        ]}
+      />
+      <DailyReportTable
+        title="機具使用"
+        rows={report.equipment || []}
+        columns={[
+          ["name", "機具"],
+          ["quantity", "數量"],
+          ["note", "備註"],
+        ]}
+      />
+      {report.sourceAttachment ? (
+        <div className="rounded-2xl border p-4">
+          <h4 className="font-bold">紙本日報來源</h4>
+          <AttachmentSummary attachments={[report.sourceAttachment]} />
+        </div>
+      ) : null}
+      <div className="rounded-2xl border p-4">
+        <h4 className="font-bold">現場施工照</h4>
+        {report.attachments?.length ? (
+          <AttachmentSummary attachments={report.attachments} />
+        ) : (
+          <p className="mt-2 text-sm text-slate-500">未附加施工照片。</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DailyReportTable({ title, rows = [], columns = [] }) {
+  return (
+    <div className="overflow-hidden rounded-2xl border">
+      <div className="border-b bg-slate-50 px-4 py-3">
+        <h4 className="font-bold">{title}</h4>
+      </div>
+      {rows.length ? (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-left text-sm">
+            <thead className="bg-white text-slate-500">
+              <tr>
+                {columns.map(([, label]) => (
+                  <th key={label} className="px-4 py-3 font-medium">
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={index} className="border-t">
+                  {columns.map(([key]) => (
+                    <td key={key} className="px-4 py-3 align-top text-slate-700">
+                      {row[key] || "未填寫"}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="p-4 text-sm text-slate-500">尚無資料。</p>
+      )}
     </div>
   );
 }
