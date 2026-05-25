@@ -3175,6 +3175,7 @@ function Daily({ p }) {
   const [reportDate, setReportDate] = useState("");
   const [dayWeather, setDayWeather] = useState("");
   const [weatherNote, setWeatherNote] = useState("");
+  const [dailyNote, setDailyNote] = useState("");
   const [paperReport, setPaperReport] = useState(null);
   const [sitePhotos, setSitePhotos] = useState([]);
   const [aiStatus, setAiStatus] = useState("idle");
@@ -3182,6 +3183,7 @@ function Daily({ p }) {
   const [aiSummary, setAiSummary] = useState(null);
   const [adding, setAdding] = useState(false);
   const [dateQuery, setDateQuery] = useState("");
+  const [keywordQuery, setKeywordQuery] = useState("");
   const [openReportId, setOpenReportId] = useState("");
   const {
     items: savedReports,
@@ -3200,6 +3202,7 @@ function Daily({ p }) {
     setReportDate("");
     setDayWeather("");
     setWeatherNote("");
+    setDailyNote("");
     setPaperReport(null);
     setSitePhotos([]);
     setAiStatus("idle");
@@ -3288,6 +3291,7 @@ function Daily({ p }) {
       date: reportDate || "未填日期",
       weather: dayWeather || "未選擇",
       weatherNote,
+      dailyNote,
       workers: totalWorkers,
       workCount: work.length,
       materialCount: mat.length,
@@ -3311,9 +3315,38 @@ function Daily({ p }) {
   }
 
   const filteredReports = savedReports.filter((report) => {
-    const keyword = dateQuery.trim();
-    if (!keyword) return true;
-    return String(report.date || "").includes(keyword);
+    const dateKeyword = dateQuery.trim();
+    const keyword = keywordQuery.trim().toLowerCase();
+    const matchesDate = !dateKeyword || String(report.date || "").includes(dateKeyword);
+    const searchableText = [
+      report.date,
+      report.weather,
+      report.weatherNote,
+      report.dailyNote,
+      report.note,
+      ...(report.work || []).flatMap((row) => [
+        row.trade,
+        row.description,
+        row.note,
+      ]),
+      ...(report.materials || []).flatMap((row) => [
+        row.name,
+        row.spec,
+        row.quantity,
+        row.unit,
+        row.note,
+      ]),
+      ...(report.equipment || []).flatMap((row) => [
+        row.name,
+        row.quantity,
+        row.note,
+      ]),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    const matchesKeyword = !keyword || searchableText.includes(keyword);
+    return matchesDate && matchesKeyword;
   });
 
   return (
@@ -3520,6 +3553,15 @@ function Daily({ p }) {
             value={sitePhotos}
             onChange={setSitePhotos}
           />
+          <label className="md:col-span-2">
+            <span className="text-sm font-medium">其他備註 / 記事</span>
+            <textarea
+              value={dailyNote}
+              onChange={(event) => setDailyNote(event.target.value)}
+              className="mt-2 min-h-28 w-full rounded-xl border px-3 py-2 outline-none"
+              placeholder="可記錄今日特殊狀況、協調事項、業主指示、停工原因或其他補充記事"
+            />
+          </label>
           <ActionBar className="md:col-span-2">
             <Button
               type="button"
@@ -3544,20 +3586,33 @@ function Daily({ p }) {
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
               <h2 className="text-lg font-bold">已儲存日報</h2>
-              <p className="mt-1 text-sm text-slate-500">可依日期搜尋，並展開查看工班、材料、機具與照片附件。</p>
+              <p className="mt-1 text-sm text-slate-500">可依日期、工班、施工項目與備註記事搜尋，並展開查看完整內容。</p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+            <div className="grid gap-2 sm:grid-cols-[160px_minmax(180px,1fr)_auto]">
               <label>
                 <span className="text-xs font-medium text-slate-500">搜尋日期</span>
                 <div className="mt-1">
                   <Input type="date" value={dateQuery} onChange={setDateQuery} />
                 </div>
               </label>
+              <label>
+                <span className="text-xs font-medium text-slate-500">快速檢索</span>
+                <div className="mt-1">
+                  <Input
+                    value={keywordQuery}
+                    onChange={setKeywordQuery}
+                    ph="搜尋工班、施工項目、備註或記事"
+                  />
+                </div>
+              </label>
               <Button
                 type="button"
                 variant="outline"
                 className="self-end"
-                onClick={() => setDateQuery("")}
+                onClick={() => {
+                  setDateQuery("");
+                  setKeywordQuery("");
+                }}
               >
                 清除
               </Button>
@@ -3597,6 +3652,11 @@ function Daily({ p }) {
                       <div className="mt-2">
                         <Badge>已附紙本日報來源</Badge>
                       </div>
+                    ) : null}
+                    {report.dailyNote || report.note ? (
+                      <p className="mt-2 line-clamp-2 text-sm text-slate-500">
+                        備註記事：{report.dailyNote || report.note}
+                      </p>
                     ) : null}
                     <AttachmentSummary attachments={report.attachments} />
                   </button>
@@ -3677,6 +3737,12 @@ function DailyReportDetails({ report }) {
           ["note", "備註"],
         ]}
       />
+      <div className="rounded-2xl border p-4">
+        <h4 className="font-bold">其他備註 / 記事</h4>
+        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">
+          {report.dailyNote || report.note || "未填寫"}
+        </p>
+      </div>
       {report.sourceAttachment ? (
         <div className="rounded-2xl border p-4">
           <h4 className="font-bold">紙本日報來源</h4>
