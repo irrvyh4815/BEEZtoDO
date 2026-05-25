@@ -16,10 +16,10 @@ export default {
 
     try {
       await ensureSchema();
-      await requirePermission(request, request.method === "GET" ? "view" : "edit");
+      const user = await requirePermission(request, request.method === "GET" ? "view" : "edit");
 
       if (request.method === "GET") {
-        return json({ projects: await listProjects() });
+        return json({ projects: await listProjects(user) });
       }
 
       const body = await readJson(request);
@@ -27,7 +27,17 @@ export default {
         throw new ApiError(400, "請輸入工地名稱", "PROJECT_NAME_REQUIRED");
       }
 
-      return json({ project: await insertProject(body) }, 201);
+      const project = await insertProject(body, user.id);
+      return json(
+        {
+          project: {
+            ...project,
+            createdByName: user.name,
+            createdByEmail: user.email,
+          },
+        },
+        201,
+      );
     } catch (error) {
       return jsonError(error);
     }

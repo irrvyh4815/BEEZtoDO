@@ -1,5 +1,6 @@
 import {
   createSessionToken,
+  emailVerificationRequired,
   publicUser,
   sessionMaxAgeSeconds,
   verifyPassword,
@@ -32,6 +33,18 @@ export default {
 
       if (!valid) {
         throw new ApiError(401, "帳號或密碼錯誤", "INVALID_CREDENTIALS");
+      }
+
+      if (
+        emailVerificationRequired() &&
+        user.role !== "admin" &&
+        !user.email_verified
+      ) {
+        throw new ApiError(
+          403,
+          "請先完成信箱驗證，再登入系統。",
+          "EMAIL_NOT_VERIFIED",
+        );
       }
 
       return json(

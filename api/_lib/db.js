@@ -1,5 +1,5 @@
 import pg from "pg";
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { hashPassword } from "./auth.js";
 import { ApiError } from "./http.js";
 
@@ -57,6 +57,7 @@ export async function query(text, params = []) {
 }
 
 export function mapProject(row) {
+  const memberRole = row.member_role || (row.user_role === "admin" ? "admin" : "");
   return {
     id: row.id,
     name: row.name,
@@ -70,6 +71,31 @@ export function mapProject(row) {
     endDate: row.end_date,
     manager: row.manager,
     note: row.note,
+    ownerId: row.owner_id,
+    createdBy: row.created_by,
+    createdByName: row.created_by_name || "",
+    createdByEmail: row.created_by_email || "",
+    memberRole,
+    canView: row.user_role === "admin" ? true : Boolean(row.member_can_view),
+    canEdit: row.user_role === "admin" ? true : Boolean(row.member_can_edit),
+    canManage: row.user_role === "admin" || ["owner", "manager"].includes(memberRole),
+    memberCount: Number(row.member_count || 0),
+    createdAt: row.created_at,
+  };
+}
+
+export function mapProjectMember(row) {
+  const role = row.member_role || row.role || "viewer";
+  return {
+    userId: row.user_id,
+    name: row.name,
+    email: row.email,
+    role,
+    canView: role === "owner" ? true : Boolean(row.can_view),
+    canEdit: ["owner", "manager", "editor"].includes(role)
+      ? true
+      : Boolean(row.can_edit),
+    createdAt: row.created_at,
   };
 }
 
@@ -97,8 +123,18 @@ export function mapUser(row) {
     role: row.role,
     canView: isAdmin ? true : row.can_view,
     canEdit: isAdmin ? true : row.can_edit,
+    emailVerified: isAdmin ? true : Boolean(row.email_verified),
+    emailVerifiedAt: row.email_verified_at,
     createdAt: row.created_at,
   };
+}
+
+function hashVerificationToken(token) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function emailVerificationDays() {
+  return Math.max(Number(process.env.EMAIL_VERIFICATION_DAYS || 2), 1);
 }
 
 async function seedAdmin() {
@@ -122,8 +158,11 @@ async function seedAdmin() {
   if (existing.rowCount > 0) return;
 
   await query(
-    `insert into users (id, email, name, password_hash, role, can_view, can_edit)
-     values ($1, lower($2), $3, $4, 'admin', true, true)`,
+    `insert into users (
+       id, email, name, password_hash, role, can_view, can_edit,
+       email_verified, email_verified_at
+     )
+     values ($1, lower($2), $3, $4, 'admin', true, true, true, now())`,
     [randomUUID(), email, name, await hashPassword(password)],
   );
 }
@@ -172,6 +211,55 @@ async function syncSampleProjects() {
   );
 }
 
+async function firstAdminId() {
+  const result = await query(
+    "select id from users where role = 'admin' order by created_at asc limit 1",
+  );
+  return result.rows[0]?.id || null;
+}
+
+function normalizeProjectMemberRole(role = "viewer") {
+  return ["owner", "manager", "editor", "viewer"].includes(role) ? role : "viewer";
+}
+
+function projectMemberPermissions(role, canView = true, canEdit = false) {
+  const normalizedRole = normalizeProjectMemberRole(role);
+  if (normalizedRole === "owner" || normalizedRole === "manager") {
+    return { role: normalizedRole, canView: true, canEdit: true };
+  }
+  if (normalizedRole === "editor") {
+    return { role: normalizedRole, canView: true, canEdit: true };
+  }
+  return {
+    role: "viewer",
+    canView: Boolean(canView),
+    canEdit: Boolean(canView) && Boolean(canEdit),
+  };
+}
+
+async function backfillProjectOwnership() {
+  const adminId = await firstAdminId();
+  if (!adminId) return;
+
+  await query(
+    `update projects
+     set owner_id = coalesce(owner_id, $1),
+         created_by = coalesce(created_by, $1)
+     where owner_id is null or created_by is null`,
+    [adminId],
+  );
+
+  await query(
+    `insert into project_members (
+       project_id, user_id, member_role, can_view, can_edit, created_by
+     )
+     select id, owner_id, 'owner', true, true, owner_id
+     from projects
+     where owner_id is not null
+     on conflict (project_id, user_id) do nothing`,
+  );
+}
+
 async function initializeSchema() {
   await query(`
     create table if not exists users (
@@ -182,12 +270,28 @@ async function initializeSchema() {
       role text not null default 'member',
       can_view boolean not null default true,
       can_edit boolean not null default false,
+      email_verified boolean not null default false,
+      email_verified_at timestamptz,
+      email_verification_token_hash text,
+      email_verification_expires_at timestamptz,
+      email_verification_sent_at timestamptz,
       created_at timestamptz not null default now()
     )
   `);
 
   await query("alter table users add column if not exists can_view boolean not null default true");
   await query("alter table users add column if not exists can_edit boolean not null default false");
+  await query("alter table users add column if not exists email_verified boolean");
+  await query("alter table users add column if not exists email_verified_at timestamptz");
+  await query("alter table users add column if not exists email_verification_token_hash text");
+  await query("alter table users add column if not exists email_verification_expires_at timestamptz");
+  await query("alter table users add column if not exists email_verification_sent_at timestamptz");
+  await query("update users set email_verified = true where email_verified is null");
+  await query(
+    "update users set email_verified_at = created_at where email_verified = true and email_verified_at is null",
+  );
+  await query("alter table users alter column email_verified set default false");
+  await query("alter table users alter column email_verified set not null");
 
   await query(`
     create table if not exists projects (
@@ -203,8 +307,31 @@ async function initializeSchema() {
       end_date text not null default '',
       manager text not null default '',
       note text not null default '',
+      owner_id text references users(id) on delete set null,
+      created_by text references users(id) on delete set null,
       created_at timestamptz not null default now()
     )
+  `);
+
+  await query("alter table projects add column if not exists owner_id text references users(id) on delete set null");
+  await query("alter table projects add column if not exists created_by text references users(id) on delete set null");
+
+  await query(`
+    create table if not exists project_members (
+      project_id text not null references projects(id) on delete cascade,
+      user_id text not null references users(id) on delete cascade,
+      member_role text not null default 'viewer',
+      can_view boolean not null default true,
+      can_edit boolean not null default false,
+      created_by text references users(id) on delete set null,
+      created_at timestamptz not null default now(),
+      primary key (project_id, user_id)
+    )
+  `);
+
+  await query(`
+    create index if not exists project_members_user_idx
+    on project_members (user_id, project_id)
   `);
 
   await query(`
@@ -227,9 +354,10 @@ async function initializeSchema() {
     on project_records (project_id, module, created_at desc)
   `);
 
-  await syncSampleProjects();
   await seedAdmin();
+  await syncSampleProjects();
   await seedProjects();
+  await backfillProjectOwnership();
 }
 
 export async function ensureSchema() {
@@ -264,14 +392,19 @@ export async function insertUser({
   role = "member",
   canView = true,
   canEdit = false,
+  emailVerified = false,
 }) {
   const normalizedRole = role === "admin" ? "admin" : "member";
   const normalizedCanView = normalizedRole === "admin" ? true : Boolean(canView);
   const normalizedCanEdit =
     normalizedRole === "admin" ? true : normalizedCanView && Boolean(canEdit);
+  const normalizedEmailVerified = normalizedRole === "admin" ? true : Boolean(emailVerified);
   const result = await query(
-    `insert into users (id, email, name, password_hash, role, can_view, can_edit)
-     values ($1, lower($2), $3, $4, $5, $6, $7)
+    `insert into users (
+       id, email, name, password_hash, role, can_view, can_edit,
+       email_verified, email_verified_at
+     )
+     values ($1, lower($2), $3, $4, $5, $6, $7, $8, case when $8 then now() else null end)
      returning *`,
     [
       randomUUID(),
@@ -281,10 +414,49 @@ export async function insertUser({
       normalizedRole,
       normalizedCanView,
       normalizedCanEdit,
+      normalizedEmailVerified,
     ],
   );
 
   return result.rows[0];
+}
+
+export async function createEmailVerificationToken(userId) {
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + emailVerificationDays() * 24 * 60 * 60 * 1000);
+  const result = await query(
+    `update users
+     set email_verification_token_hash = $2,
+         email_verification_expires_at = $3,
+         email_verification_sent_at = now()
+     where id = $1
+     returning *`,
+    [userId, hashVerificationToken(token), expiresAt],
+  );
+
+  if (!result.rows[0]) {
+    throw new ApiError(404, "找不到帳號", "USER_NOT_FOUND");
+  }
+
+  return { token, user: result.rows[0] };
+}
+
+export async function verifyEmailToken(token) {
+  if (!token) return null;
+
+  const result = await query(
+    `update users
+     set email_verified = true,
+         email_verified_at = now(),
+         email_verification_token_hash = null,
+         email_verification_expires_at = null
+     where email_verification_token_hash = $1
+       and email_verification_expires_at > now()
+     returning *`,
+    [hashVerificationToken(token)],
+  );
+
+  return result.rows[0] || null;
 }
 
 export async function listUsers() {
@@ -348,21 +520,40 @@ export async function deleteUser(id) {
   return result.rowCount > 0;
 }
 
-export async function listProjects() {
-  const result = await query("select * from projects order by created_at asc");
+export async function listProjects(user) {
+  const isAdmin = user?.role === "admin";
+  const result = await query(
+    `select p.*,
+            owner_user.name as created_by_name,
+            owner_user.email as created_by_email,
+            pm.member_role,
+            pm.can_view as member_can_view,
+            pm.can_edit as member_can_edit,
+            $2::text as user_role,
+            count(all_members.user_id)::int as member_count
+     from projects p
+     left join users owner_user on owner_user.id = p.created_by
+     left join project_members pm on pm.project_id = p.id and pm.user_id = $1
+     left join project_members all_members on all_members.project_id = p.id
+     where $2 = 'admin' or pm.user_id is not null
+     group by p.id, owner_user.name, owner_user.email, pm.member_role, pm.can_view, pm.can_edit
+     order by p.created_at asc`,
+    [user?.id || "", isAdmin ? "admin" : "member"],
+  );
   return result.rows.map(mapProject);
 }
 
-export async function insertProject(project) {
+export async function insertProject(project, userId) {
+  const projectId = randomUUID();
   const result = await query(
     `insert into projects (
       id, name, owner, status, address, defects, daily_photos, next_claim,
-      start_date, end_date, manager, note
+      start_date, end_date, manager, note, owner_id, created_by
     )
-    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)
     returning *`,
     [
-      randomUUID(),
+      projectId,
       project.name || "未命名工地",
       project.owner || "未填寫",
       project.status || "進行中",
@@ -374,10 +565,32 @@ export async function insertProject(project) {
       project.endDate || "",
       project.manager || "",
       project.note || "",
+      userId || null,
     ],
   );
 
-  return mapProject(result.rows[0]);
+  if (userId) {
+    await query(
+      `insert into project_members (
+         project_id, user_id, member_role, can_view, can_edit, created_by
+       )
+       values ($1, $2, 'owner', true, true, $2)
+       on conflict (project_id, user_id) do update
+       set member_role = 'owner',
+           can_view = true,
+           can_edit = true`,
+      [projectId, userId],
+    );
+  }
+
+  return {
+    ...mapProject(result.rows[0]),
+    memberRole: userId ? "owner" : "",
+    canView: Boolean(userId),
+    canEdit: Boolean(userId),
+    canManage: Boolean(userId),
+    memberCount: userId ? 1 : 0,
+  };
 }
 
 export async function deleteProject(id) {
@@ -430,6 +643,93 @@ export async function deleteProjectRecord(projectId, recordId) {
   const result = await query(
     "delete from project_records where project_id = $1 and id = $2",
     [projectId, recordId],
+  );
+  return result.rowCount > 0;
+}
+
+export async function getProjectAccess(projectId, userId) {
+  const result = await query(
+    `select p.id as project_id,
+            p.owner_id,
+            pm.member_role,
+            pm.can_view,
+            pm.can_edit
+     from projects p
+     left join project_members pm on pm.project_id = p.id and pm.user_id = $2
+     where p.id = $1`,
+    [projectId, userId],
+  );
+
+  return result.rows[0] || null;
+}
+
+export async function listProjectMembers(projectId) {
+  const result = await query(
+    `select pm.user_id,
+            pm.member_role,
+            pm.can_view,
+            pm.can_edit,
+            pm.created_at,
+            u.name,
+            u.email
+     from project_members pm
+     join users u on u.id = pm.user_id
+     where pm.project_id = $1
+     order by case pm.member_role
+       when 'owner' then 1
+       when 'manager' then 2
+       when 'editor' then 3
+       else 4
+     end, pm.created_at asc`,
+    [projectId],
+  );
+
+  return result.rows.map(mapProjectMember);
+}
+
+export async function upsertProjectMember(projectId, userId, options = {}) {
+  const permissions = projectMemberPermissions(
+    options.role || options.memberRole,
+    options.canView,
+    options.canEdit,
+  );
+
+  const result = await query(
+    `insert into project_members (
+       project_id, user_id, member_role, can_view, can_edit, created_by
+     )
+     values ($1, $2, $3, $4, $5, $6)
+     on conflict (project_id, user_id) do update
+     set member_role = case
+           when project_members.member_role = 'owner' then 'owner'
+           else excluded.member_role
+         end,
+         can_view = case
+           when project_members.member_role = 'owner' then true
+           else excluded.can_view
+         end,
+         can_edit = case
+           when project_members.member_role = 'owner' then true
+           else excluded.can_edit
+         end
+     returning *`,
+    [
+      projectId,
+      userId,
+      permissions.role,
+      permissions.canView,
+      permissions.canEdit,
+      options.createdBy || null,
+    ],
+  );
+
+  return result.rows[0];
+}
+
+export async function removeProjectMember(projectId, userId) {
+  const result = await query(
+    "delete from project_members where project_id = $1 and user_id = $2 and member_role <> 'owner'",
+    [projectId, userId],
   );
   return result.rowCount > 0;
 }

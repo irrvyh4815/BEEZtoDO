@@ -1,5 +1,16 @@
-import { hashPassword, requireUser } from "../_lib/auth.js";
-import { ensureSchema, insertUser, listUsers, mapUser } from "../_lib/db.js";
+import { emailVerificationRequired, hashPassword, requireUser } from "../_lib/auth.js";
+import {
+  createEmailVerificationToken,
+  ensureSchema,
+  insertUser,
+  listUsers,
+  mapUser,
+} from "../_lib/db.js";
+import {
+  emailProviderConfigured,
+  sendVerificationEmail,
+  verificationUrl,
+} from "../_lib/email.js";
 import {
   ApiError,
   json,
@@ -38,6 +49,17 @@ export default {
         throw new ApiError(400, "密碼至少需要 8 碼", "PASSWORD_TOO_SHORT");
       }
 
+      const shouldVerifyEmail =
+        emailVerificationRequired() && (body.role || "member") !== "admin";
+
+      if (shouldVerifyEmail && !emailProviderConfigured()) {
+        throw new ApiError(
+          400,
+          "尚未設定寄信服務，請先設定 RESEND_API_KEY 與 EMAIL_FROM。",
+          "EMAIL_PROVIDER_MISSING",
+        );
+      }
+
       const user = await insertUser({
         email: body.email,
         name: body.name,
@@ -45,9 +67,22 @@ export default {
         role: body.role || "member",
         canView: body.canView ?? true,
         canEdit: body.canEdit ?? false,
+        emailVerified: !shouldVerifyEmail,
       });
 
-      return json({ user: mapUser(user) }, 201);
+      if (shouldVerifyEmail) {
+        const { token } = await createEmailVerificationToken(user.id);
+        await sendVerificationEmail({
+          to: user.email,
+          name: user.name,
+          url: verificationUrl(request, token),
+        });
+      }
+
+      return json(
+        { user: mapUser(user), verificationEmailSent: shouldVerifyEmail },
+        201,
+      );
     } catch (error) {
       return jsonError(error);
     }

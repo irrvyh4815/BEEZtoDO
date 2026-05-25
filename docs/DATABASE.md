@@ -17,9 +17,16 @@
 | `role` | `text` | `admin` 或 `member` |
 | `can_view` | `boolean` | 是否可閱覽資料 |
 | `can_edit` | `boolean` | 是否可新增、修改、刪除資料 |
+| `email_verified` | `boolean` | 信箱是否完成驗證 |
+| `email_verified_at` | `timestamptz` | 信箱完成驗證時間 |
+| `email_verification_token_hash` | `text` | 驗證 token 的 SHA-256 hash |
+| `email_verification_expires_at` | `timestamptz` | 驗證連結失效時間 |
+| `email_verification_sent_at` | `timestamptz` | 最近一次寄送驗證信時間 |
 | `created_at` | `timestamptz` | 建立時間 |
 
 `admin` 永遠視為最高權限，後端會強制 `can_view = true`、`can_edit = true`，且不可透過權限管理降權或刪除。`member` 才會依照 `can_view` / `can_edit` 控制閱覽與編輯；若 `can_view = false`，後端也會一併關閉 `can_edit`。
+
+若 `EMAIL_VERIFICATION_REQUIRED=true`，一般帳號必須先完成信箱驗證才可登入；管理員帳號預設視為已驗證，避免公開上線時被鎖在系統外。
 
 ### `projects`
 
@@ -39,7 +46,25 @@
 | `end_date` | `text` | 預計完工日期 |
 | `manager` | `text` | 工地主任 |
 | `note` | `text` | 備註 |
+| `owner_id` | `text` | 工地建立者 / 擁有者 `users.id` |
+| `created_by` | `text` | 建立此工地的帳號 `users.id` |
 | `created_at` | `timestamptz` | 建立時間 |
+
+### `project_members`
+
+工地成員與多客戶隔離權限。一般使用者只能讀取自己建立或被加入的工地；系統管理員仍可檢視全部工地。
+
+| 欄位 | 型別 | 說明 |
+| --- | --- | --- |
+| `project_id` | `text` | 對應 `projects.id` |
+| `user_id` | `text` | 對應 `users.id` |
+| `member_role` | `text` | `owner`、`manager`、`editor`、`viewer` |
+| `can_view` | `boolean` | 是否可查看此工地 |
+| `can_edit` | `boolean` | 是否可編輯此工地資料 |
+| `created_by` | `text` | 邀請人 `users.id` |
+| `created_at` | `timestamptz` | 加入時間 |
+
+建立工地時，建立者會自動成為 `owner`。`manager` 可作為共同管理者管理成員與編輯資料；`editor` 可編輯資料但不能管理成員；`viewer` 只能閱覽。
 
 ### `project_records`
 
@@ -238,6 +263,31 @@
 }
 ```
 
+若已啟用 `EMAIL_VERIFICATION_REQUIRED=true`，註冊成功後系統會寄送驗證信，並回傳：
+
+```json
+{
+  "emailVerificationRequired": true,
+  "verificationEmailSent": true
+}
+```
+
+### 信箱驗證
+
+`GET /api/auth/verify-email?token=...`
+
+使用者點擊驗證信中的連結後，後端會驗證 token、標記 `email_verified = true`，並顯示回登入頁按鈕。
+
+`POST /api/auth/resend-verification`
+
+```json
+{
+  "email": "site-manager@example.com"
+}
+```
+
+登入頁與帳號管理都可用此 API 重寄驗證信。
+
 ### 登入
 
 `POST /api/auth/login`
@@ -328,6 +378,39 @@
 `POST /api/projects`
 
 `DELETE /api/projects/:projectId`
+
+`GET /api/projects` 會依目前登入者過濾工地：系統管理員可取得全部，一般帳號只能取得 `project_members` 內已有權限的工地。
+
+### 工地成員
+
+需具備該工地的 `owner`、`manager` 或系統管理員權限。
+
+`GET /api/projects/:projectId/members`
+
+`POST /api/projects/:projectId/members`
+
+```json
+{
+  "email": "partner@example.com",
+  "role": "manager"
+}
+```
+
+更新成員角色：
+
+`PATCH /api/projects/:projectId/members/:userId`
+
+```json
+{
+  "role": "editor"
+}
+```
+
+移除成員：
+
+`DELETE /api/projects/:projectId/members/:userId`
+
+`owner` 不能被移除；若要轉移擁有權，後續應另做專門的 owner transfer 流程。
 
 ### 工地內表單資料
 

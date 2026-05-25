@@ -49,7 +49,12 @@ export function publicUser(user) {
     role: user.role,
     canView: isAdmin ? true : user.can_view ?? user.canView ?? true,
     canEdit: isAdmin ? true : user.can_edit ?? user.canEdit ?? false,
+    emailVerified: isAdmin ? true : Boolean(user.email_verified ?? user.emailVerified ?? false),
   };
+}
+
+export function emailVerificationRequired() {
+  return String(process.env.EMAIL_VERIFICATION_REQUIRED || "").toLowerCase() === "true";
 }
 
 export function createSessionToken(user) {

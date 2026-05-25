@@ -10,7 +10,7 @@ import {
   methodNotAllowed,
   readJson,
 } from "../../../_lib/http.js";
-import { requirePermission } from "../../../_lib/permissions.js";
+import { requireProjectAccess } from "../../../_lib/permissions.js";
 
 function projectIdFromUrl(url) {
   const parts = new URL(url).pathname.split("/").filter(Boolean);
@@ -26,15 +26,17 @@ export default {
 
     try {
       await ensureSchema();
-      const user = await requirePermission(
-        request,
-        request.method === "GET" ? "view" : "edit",
-      );
 
       const projectId = projectIdFromUrl(request.url);
       if (!projectId) {
         throw new ApiError(400, "缺少工地 ID", "PROJECT_ID_REQUIRED");
       }
+
+      const { user } = await requireProjectAccess(
+        request,
+        projectId,
+        request.method === "GET" ? "view" : "edit",
+      );
 
       if (request.method === "GET") {
         const module = new URL(request.url).searchParams.get("module");

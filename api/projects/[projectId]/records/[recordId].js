@@ -1,6 +1,6 @@
 import { deleteProjectRecord, ensureSchema } from "../../../_lib/db.js";
 import { ApiError, json, jsonError, methodNotAllowed } from "../../../_lib/http.js";
-import { requirePermission } from "../../../_lib/permissions.js";
+import { requireProjectAccess } from "../../../_lib/permissions.js";
 
 function idsFromUrl(url) {
   const parts = new URL(url).pathname.split("/").filter(Boolean);
@@ -19,12 +19,13 @@ export default {
 
     try {
       await ensureSchema();
-      await requirePermission(request, "edit");
 
       const { projectId, recordId } = idsFromUrl(request.url);
       if (!projectId || !recordId) {
         throw new ApiError(400, "缺少工地或資料 ID", "RECORD_ID_REQUIRED");
       }
+
+      await requireProjectAccess(request, projectId, "edit");
 
       const deleted = await deleteProjectRecord(projectId, recordId);
       if (!deleted) {

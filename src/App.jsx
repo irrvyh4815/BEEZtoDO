@@ -17,6 +17,7 @@ import {
   Megaphone,
   Package,
   Plus,
+  RefreshCw,
   Save,
   Search,
   ShieldCheck,
@@ -85,7 +86,7 @@ const mods = [
   ["photos", "照片中心"],
 ].map(([id, label]) => ({ id, label, icon: I[id] }));
 
-const APP_VERSION = "eztodo_26052402";
+const APP_VERSION = "eztodo_26052502";
 const SAMPLE_PROJECT_NAME = "範例工地：東區住宅新建工程";
 const DAILY_AI_SOURCE_MAX_BYTES = 3 * 1024 * 1024;
 
@@ -127,6 +128,7 @@ const adminSeedUsers = [
     role: "admin",
     canView: true,
     canEdit: true,
+    emailVerified: true,
   },
   {
     id: "viewer",
@@ -135,6 +137,7 @@ const adminSeedUsers = [
     role: "member",
     canView: true,
     canEdit: false,
+    emailVerified: true,
   },
 ];
 
@@ -146,6 +149,7 @@ function normalizeAccountPermissions(user) {
     role: isAdmin ? "admin" : user.role || "member",
     canView: isAdmin ? true : canView,
     canEdit: isAdmin ? true : canView && Boolean(user.canEdit ?? false),
+    emailVerified: isAdmin ? true : Boolean(user.emailVerified ?? true),
   };
 }
 
@@ -160,6 +164,22 @@ function defaultAccountDraft() {
   };
 }
 
+const projectMemberRoleOptions = [
+  { value: "manager", label: "共同管理者" },
+  { value: "editor", label: "可編輯" },
+  { value: "viewer", label: "僅閱覽" },
+];
+
+function projectMemberRoleLabel(role) {
+  return {
+    admin: "系統管理員",
+    owner: "工地建立者",
+    manager: "共同管理者",
+    editor: "可編輯",
+    viewer: "僅閱覽",
+  }[role] || "成員";
+}
+
 const claimSeed = [
   {
     period: "第 1 期",
@@ -169,6 +189,7 @@ const claimSeed = [
     contract: "水電配管工程",
     amount: 185000,
     status: "待付款",
+    projectName: SAMPLE_PROJECT_NAME,
   },
   {
     period: "第 2 期",
@@ -178,6 +199,7 @@ const claimSeed = [
     contract: "浴室泥作工程",
     amount: 126000,
     status: "審核中",
+    projectName: SAMPLE_PROJECT_NAME,
   },
   {
     period: "第 1 期",
@@ -187,6 +209,7 @@ const claimSeed = [
     contract: "防水工程",
     amount: 98000,
     status: "待送審",
+    projectName: SAMPLE_PROJECT_NAME,
   },
 ];
 
@@ -543,7 +566,10 @@ async function apiFetch(path, options = {}) {
     response.status === 204 ? null : await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(data?.error || "伺服器連線失敗");
+    const error = new Error(data?.error || "伺服器連線失敗");
+    error.code = data?.code || "API_ERROR";
+    error.status = response.status;
+    throw error;
   }
 
   return data;
@@ -888,12 +914,17 @@ function LoginScreen({ onLogin }) {
   const [email, setEmail] = useState("admin@eztodo.local");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [errorCode, setErrorCode] = useState("");
+  const [resendNotice, setResendNotice] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
   const loginTags = ["工地管理", "施工日報", "廠商請款", "缺失追蹤", "甘特圖", "照片附件"];
 
   async function handleSubmit(event) {
     event.preventDefault();
     setError("");
+    setErrorCode("");
+    setResendNotice("");
     setLoading(true);
 
     try {
@@ -904,8 +935,28 @@ function LoginScreen({ onLogin }) {
       onLogin(data.user);
     } catch (err) {
       setError(err.message);
+      setErrorCode(err.code || "");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function resendVerification() {
+    setError("");
+    setResendNotice("");
+    setResendLoading(true);
+
+    try {
+      const data = await apiFetch("/api/auth/resend-verification", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+      setResendNotice(data.message || "驗證信已寄出，請到信箱收信。");
+    } catch (err) {
+      setError(err.message);
+      setErrorCode(err.code || "");
+    } finally {
+      setResendLoading(false);
     }
   }
 
@@ -974,6 +1025,29 @@ function LoginScreen({ onLogin }) {
               {error ? (
                 <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                   {error}
+                  {errorCode === "EMAIL_NOT_VERIFIED" ? (
+                    <div className="mt-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={resendVerification}
+                        disabled={resendLoading}
+                        className="bg-white text-red-700 hover:bg-red-50"
+                      >
+                        {resendLoading ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="mr-2 h-4 w-4" />
+                        )}
+                        重寄驗證信
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {resendNotice ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                  {resendNotice}
                 </div>
               ) : null}
               <Button type="submit" disabled={loading} className="mt-1">
@@ -998,6 +1072,7 @@ function ProjectSelect({ onSelect }) {
   const [list, setList] = useState(useLocalPreview ? previewProjects : []);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(!useLocalPreview);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [p, setP] = useState({
     name: "",
@@ -1011,30 +1086,29 @@ function ProjectSelect({ onSelect }) {
     attachments: [],
   });
 
-  useEffect(() => {
-    if (useLocalPreview) return;
-
-    let active = true;
-
-    async function loadProjects() {
-      setLoading(true);
-      setError("");
-
-      try {
-        const data = await apiFetch("/api/projects");
-        if (active) setList(data.projects || []);
-      } catch (err) {
-        if (active) setError(err.message);
-      } finally {
-        if (active) setLoading(false);
-      }
+  async function loadProjects({ quiet = false } = {}) {
+    if (useLocalPreview) {
+      setRefreshing(false);
+      return;
     }
 
-    loadProjects();
+    setLoading(!quiet);
+    setRefreshing(quiet);
+    setError("");
 
-    return () => {
-      active = false;
-    };
+    try {
+      const data = await apiFetch("/api/projects");
+      setList(data.projects || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  useEffect(() => {
+    loadProjects();
   }, []);
 
   async function createProject() {
@@ -1184,17 +1258,35 @@ function ProjectSelect({ onSelect }) {
       <div className="mb-6 flex flex-col justify-between gap-4 rounded-3xl bg-slate-900 p-6 text-white sm:flex-row sm:items-center">
         <div>
           <h1 className="text-3xl font-bold">請先創建/選擇工地</h1>
-          <p className="mt-2 text-sm text-slate-300">建立或選擇工地，避免多案場資料混在一起。</p>
+          <p className="mt-2 text-sm text-slate-300">
+            只會顯示你建立或被邀請共同管理的工地；系統管理員可檢視全部工地。
+          </p>
         </div>
+        <Button
+          type="button"
+          variant="outline"
+          className="border-white/20 bg-white/10 text-white hover:bg-white/20"
+          disabled={refreshing || loading}
+          onClick={() => loadProjects({ quiet: true })}
+        >
+          <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+          刷新工地
+        </Button>
       </div>
-      <div className="mb-4 flex gap-3 rounded-2xl border bg-white p-3">
-        <Search className="h-5 w-5 text-slate-400" />
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          className="w-full outline-none"
-          placeholder="搜尋工地"
-        />
+      <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_auto]">
+        <div className="flex gap-3 rounded-2xl border bg-white p-3">
+          <Search className="h-5 w-5 text-slate-400" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            className="w-full outline-none"
+            placeholder="搜尋工地"
+          />
+        </div>
+        <Button type="button" variant="outline" onClick={() => setMode("create")}>
+          <Plus className="mr-2 h-4 w-4" />
+          新增工地
+        </Button>
       </div>
       {error ? (
         <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -1221,6 +1313,11 @@ function ProjectSelect({ onSelect }) {
                   <p className="mt-1 flex gap-1 text-sm text-slate-500">
                     <UserRound className="h-4 w-4" />
                     業主：{project.owner}
+                  </p>
+                  <p className="mt-1 flex gap-1 text-sm text-slate-500">
+                    <UserRound className="h-4 w-4" />
+                    建立者：{project.createdByName || "系統管理員"}
+                    {project.memberRole ? `｜我的權限：${projectMemberRoleLabel(project.memberRole)}` : ""}
                   </p>
                   <p className="mt-1 text-sm text-slate-500">
                     開工：{formatDate(project.startDate)}｜預計完工：{formatDate(project.endDate)}
@@ -1261,20 +1358,18 @@ function ProjectSelect({ onSelect }) {
                   進入
                   <ChevronRight className="ml-2 h-4 w-4" />
                 </Button>
-                <Del
-                  label={project.name}
-                  onClick={() => removeProject(project)}
-                />
+                {project.canManage ? (
+                  <Del
+                    label={project.name}
+                    onClick={() => removeProject(project)}
+                  />
+                ) : (
+                  <Badge>{project.canEdit ? "可共同編輯" : "僅可閱覽"}</Badge>
+                )}
               </div>
             </CardContent>
           </Card>
         ))}
-      </div>
-      <div className="mt-6 flex justify-end">
-        <Button type="button" variant="outline" onClick={() => setMode("create")}>
-          <Plus className="mr-2 h-4 w-4" />
-          新增工地
-        </Button>
       </div>
       <VersionFooter className="mt-6" />
     </Shell>
@@ -1605,6 +1700,245 @@ function VendorContacts({ contracts }) {
     </Card>
   );
 }
+
+function ProjectMembers({ project }) {
+  const [members, setMembers] = useState([]);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("manager");
+  const [loading, setLoading] = useState(!useLocalPreview);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const canManage = useLocalPreview || Boolean(project.canManage);
+
+  async function loadMembers() {
+    if (useLocalPreview) {
+      setMembers([
+        {
+          userId: "preview-owner",
+          name: project.createdByName || "本機預覽",
+          email: "preview@local",
+          role: "owner",
+          canView: true,
+          canEdit: true,
+        },
+      ]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const data = await apiFetch(`/api/projects/${encodeURIComponent(project.id)}/members`);
+      setMembers(data.members || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (project.id) loadMembers();
+  }, [project.id]);
+
+  async function addMember() {
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setError("請輸入已註冊帳號 Email");
+      return;
+    }
+
+    setBusy("add");
+    setError("");
+
+    if (useLocalPreview) {
+      setMembers([
+        ...members,
+        {
+          userId: `preview-member-${Date.now()}`,
+          name: cleanEmail.split("@")[0],
+          email: cleanEmail,
+          role,
+          canView: true,
+          canEdit: role !== "viewer",
+        },
+      ]);
+      setEmail("");
+      setBusy("");
+      return;
+    }
+
+    try {
+      const data = await apiFetch(`/api/projects/${encodeURIComponent(project.id)}/members`, {
+        method: "POST",
+        body: JSON.stringify({ email: cleanEmail, role }),
+      });
+      setMembers(data.members || []);
+      setEmail("");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function updateMember(member, nextRole) {
+    if (member.role === "owner") return;
+
+    setError("");
+    const previous = members;
+    const nextMembers = members.map((item) =>
+      item.userId === member.userId
+        ? { ...item, role: nextRole, canView: true, canEdit: nextRole !== "viewer" }
+        : item,
+    );
+    setMembers(nextMembers);
+
+    if (useLocalPreview) return;
+
+    try {
+      const data = await apiFetch(
+        `/api/projects/${encodeURIComponent(project.id)}/members/${encodeURIComponent(member.userId)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ role: nextRole }),
+        },
+      );
+      setMembers(data.members || nextMembers);
+    } catch (err) {
+      setError(err.message);
+      setMembers(previous);
+    }
+  }
+
+  async function removeMember(member) {
+    if (member.role === "owner") return;
+    if (!window.confirm(`確定將「${member.email}」移出此工地？`)) return;
+
+    const previous = members;
+    setMembers(members.filter((item) => item.userId !== member.userId));
+    setError("");
+
+    if (useLocalPreview) return;
+
+    try {
+      const data = await apiFetch(
+        `/api/projects/${encodeURIComponent(project.id)}/members/${encodeURIComponent(member.userId)}`,
+        { method: "DELETE" },
+      );
+      setMembers(data.members || []);
+    } catch (err) {
+      setError(err.message);
+      setMembers(previous);
+    }
+  }
+
+  return (
+    <Card className="lg:col-span-3">
+      <CardContent className="p-5">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-lg font-bold">工地成員與隔離權限</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              只有工地建立者、共同管理者與被邀請成員能看到此工地；系統管理員可檢視全部工地。
+            </p>
+          </div>
+          <Button type="button" variant="outline" disabled={loading} onClick={loadMembers}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            刷新成員
+          </Button>
+        </div>
+
+        {error ? (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        ) : null}
+
+        {canManage ? (
+          <div className="mb-4 grid gap-3 rounded-2xl bg-slate-50 p-4 lg:grid-cols-[1fr_180px_auto]">
+            <Input value={email} onChange={setEmail} ph="輸入已註冊帳號 Email" />
+            <select
+              value={role}
+              onChange={(event) => setRole(event.target.value)}
+              className="w-full rounded-xl border bg-white px-3 py-2 outline-none"
+            >
+              {projectMemberRoleOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <Button type="button" disabled={busy === "add"} onClick={addMember}>
+              {busy === "add" ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Plus className="mr-2 h-4 w-4" />
+              )}
+              邀請加入
+            </Button>
+          </div>
+        ) : null}
+
+        {loading ? (
+          <div className="rounded-2xl border border-dashed p-6 text-center text-sm text-slate-500">
+            讀取成員中
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {members.map((member) => (
+              <div key={member.userId} className="rounded-2xl border p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="break-words font-bold">{member.name || member.email}</h3>
+                      <Badge>{projectMemberRoleLabel(member.role)}</Badge>
+                    </div>
+                    <p className="mt-1 break-words text-sm text-slate-500">{member.email}</p>
+                    <p className="mt-2 text-xs text-slate-500">
+                      {member.canEdit ? "可查看與編輯此工地資料" : "只能查看此工地資料"}
+                    </p>
+                  </div>
+                  {canManage && member.role !== "owner" ? (
+                    <button
+                      type="button"
+                      onClick={() => removeMember(member)}
+                      className="rounded-lg p-2 text-red-600 hover:bg-red-50"
+                      aria-label={`移除 ${member.email}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                </div>
+                {canManage && member.role !== "owner" ? (
+                  <select
+                    value={member.role}
+                    onChange={(event) => updateMember(member, event.target.value)}
+                    className="mt-3 w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none"
+                  >
+                    {projectMemberRoleOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+              </div>
+            ))}
+            {!members.length ? (
+              <div className="rounded-2xl border border-dashed p-6 text-center text-sm text-slate-500 md:col-span-2">
+                尚無工地成員資料。
+              </div>
+            ) : null}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function Dashboard({ p, claims, memoItems, todoItems, contractItems }) {
   const m = p.nextClaim || "2026/05";
   const total = sum(claims, m);
@@ -1644,13 +1978,14 @@ function Dashboard({ p, claims, memoItems, todoItems, contractItems }) {
           </CardContent>
         </Card>
         <DashboardCalendar className="lg:col-span-2" project={p} todos={todoItems} memos={memoItems} />
+        <ProjectMembers project={p} />
         <VendorContacts contracts={contractItems} />
       </div>
     </div>
   );
 }
 
-function Claims({ p, claims, setClaims }) {
+function Claims({ p, claims, setClaims, allClaims = claims }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState({
     period: "",
@@ -1672,9 +2007,11 @@ function Claims({ p, claims, setClaims }) {
       contract: draft.contract || "未填寫合約",
       amount: Number(draft.amount || 0),
       attachments: draft.attachments || [],
+      projectId: p.id,
+      projectName: p.name,
     };
 
-    setClaims([next, ...claims]);
+    setClaims([next, ...allClaims]);
     setDraft({
       period: "",
       month: p.nextClaim || "2026/05",
@@ -1714,7 +2051,7 @@ function Claims({ p, claims, setClaims }) {
               <p className="text-sm text-slate-500">本期請款</p>
               <p className="text-2xl font-bold">{twd(x.amount)}</p>
               <div className="mt-2">
-                <Del label={`${x.vendor} ${x.period}`} onClick={() => setClaims(claims.filter((c) => c !== x))} />
+                <Del label={`${x.vendor} ${x.period}`} onClick={() => setClaims(allClaims.filter((c) => c !== x))} />
               </div>
             </div>
           </CardContent>
@@ -3381,17 +3718,37 @@ function Manual() {
     },
     {
       title: "帳號管理",
-      desc: "管理員可建立帳號並調整使用者是否能閱覽或編輯。",
+      desc: "管理員可建立帳號、調整權限，並管理信箱驗證狀態。",
       items: [
         "右上角管理可開啟帳號與權限管理。",
         "目前帳號設定可修改暱稱、變更密碼或登出。",
-        "帳號列表採收合式呈現，展開後可重設密碼或調整權限。",
+        "帳號列表採收合式呈現，展開後可重設密碼、調整權限或重寄驗證信。",
+        "工地總覽可管理工地成員，只有被加入該工地的帳號能看到與操作資料。",
       ],
     },
   ];
   const versionNotes = [
     {
       version: APP_VERSION,
+      title: "多客戶工地隔離與共同管理",
+      items: [
+        "新增工地建立者與 project_members 成員權限模型。",
+        "工地列表改為只顯示自己建立或被邀請加入的工地；系統管理員仍可看到全部工地。",
+        "工地總覽新增成員管理，可邀請已註冊帳號成為共同管理者、可編輯或僅閱覽。",
+        "選擇工地頁新增刷新工地按鈕，讓被邀請人可立即重新讀取新工地。",
+      ],
+    },
+    {
+      version: "eztodo_26052501",
+      title: "公開上線前信箱驗證",
+      items: [
+        "新增信箱驗證資料欄位、驗證連結與重寄驗證信 API。",
+        "登入時若一般帳號尚未完成信箱驗證，系統會阻擋登入並提供重寄驗證信。",
+        "帳號管理列表會顯示信箱驗證狀態，管理員可替未驗證帳號重寄驗證信。",
+      ],
+    },
+    {
+      version: "eztodo_26052402",
       title: "施工日報 AI 匯入與照片附件",
       items: [
         "施工日報新增紙本日報圖片上傳與 AI 判讀填入功能。",
@@ -3748,7 +4105,30 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
       });
       setUsers([normalizeAccountPermissions(data.user), ...users]);
       setDraft(defaultAccountDraft());
-      setNotice("帳號已新增");
+      setNotice(data.verificationEmailSent ? "帳號已新增，驗證信已寄出" : "帳號已新增");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function resendUserVerification(user) {
+    setError("");
+    setNotice("");
+
+    if (useLocalPreview) {
+      setNotice(`已模擬寄送 ${user.email} 的驗證信`);
+      return;
+    }
+
+    try {
+      setBusy(`verify-${user.id}`);
+      const data = await apiFetch("/api/auth/resend-verification", {
+        method: "POST",
+        body: JSON.stringify({ email: user.email }),
+      });
+      setNotice(data.message || `已寄送 ${user.email} 的驗證信`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -4127,6 +4507,9 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
                         <Badge>{isAdmin ? "管理員" : "一般帳號"}</Badge>
                         {isAdmin ? <Badge>最高權限</Badge> : null}
                         {!isAdmin ? <Badge>{user.canEdit ? "可編輯" : user.canView ? "僅閱覽" : "未開放"}</Badge> : null}
+                        {!isAdmin ? (
+                          <Badge>{user.emailVerified ? "信箱已驗證" : "待信箱驗證"}</Badge>
+                        ) : null}
                       </div>
                       <p className="mt-1 text-sm text-slate-500">{user.email}</p>
                     </button>
@@ -4193,6 +4576,23 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
                       重設密碼
                     </Button>
                   </div>
+                  {!isAdmin && !user.emailVerified ? (
+                    <div className="mt-3 flex justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => resendUserVerification(user)}
+                        disabled={busy === `verify-${user.id}`}
+                      >
+                        {busy === `verify-${user.id}` ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="mr-2 h-4 w-4" />
+                        )}
+                        重寄驗證信
+                      </Button>
+                    </div>
+                  ) : null}
                   <div className="mt-3 flex justify-end">
                     <Button
                       type="button"
@@ -4281,6 +4681,7 @@ export default function App() {
   const page = useMemo(() => {
     if (!p) return null;
     const projectContracts = contractItems.filter((item) => matchesProject(item, p));
+    const projectClaims = claims.filter((item) => matchesProject(item, p));
     const projectMemos = memoItems.filter((item) => matchesProject(item, p));
     const projectScheduleItems = scheduleItems.filter((item) => matchesProject(item, p));
     const projectTodoItems = todoItems.filter((item) => matchesProject(item, p));
@@ -4290,14 +4691,14 @@ export default function App() {
       return (
         <Dashboard
           p={p}
-          claims={claims}
+          claims={projectClaims}
           memoItems={projectMemos}
           todoItems={projectTodoItems}
           contractItems={projectContracts}
         />
       );
     }
-    if (active === "claims") return <Claims p={p} claims={claims} setClaims={setClaims} />;
+    if (active === "claims") return <Claims p={p} claims={projectClaims} setClaims={setClaims} allClaims={claims} />;
     if (active === "contracts") {
       return (
         <Contracts
@@ -4410,6 +4811,13 @@ export default function App() {
                   <p className="mt-2 flex items-start gap-1.5 text-xs leading-5 text-slate-300">
                     <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     <span>{p.address || "未填寫地址"}</span>
+                  </p>
+                  <p className="mt-2 flex items-start gap-1.5 text-xs leading-5 text-slate-300">
+                    <UserRound className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      建立者：{p.createdByName || "系統管理員"}
+                      {p.memberRole ? `｜我的權限：${projectMemberRoleLabel(p.memberRole)}` : ""}
+                    </span>
                   </p>
                   <label className="mt-4 block">
                     <span className="text-xs font-medium text-slate-400">工地狀態</span>
