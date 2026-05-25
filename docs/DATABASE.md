@@ -13,6 +13,7 @@
 | `id` | `text` | 使用者 ID |
 | `email` | `text` | 登入帳號，唯一 |
 | `name` | `text` | 使用者暱稱 / 顯示名稱 |
+| `member_no` | `text` | 會員編號，例如 `2600001` |
 | `organization_name` | `text` | 所屬單位 / 分組名稱 |
 | `password_hash` | `text` | bcrypt hash 後的密碼 |
 | `role` | `text` | `admin` 或 `member` |
@@ -29,6 +30,8 @@
 `admin` 永遠視為最高權限，後端會強制 `can_view = true`、`can_edit = true`，且不可透過權限管理降權或刪除。`member` 才會依照 `can_view` / `can_edit` 控制閱覽與編輯；若 `can_view = false`，後端也會一併關閉 `can_edit`。
 
 若 `EMAIL_VERIFICATION_REQUIRED=true`，一般帳號必須先完成信箱驗證才可登入；管理員帳號預設視為已驗證，避免公開上線時被鎖在系統外。
+
+會員編號格式為「年份後兩碼 + 五位序號」，例如 `2600001` 代表 2026 年第 1 筆帳號。既有帳號會在資料庫初始化時自動補上會員編號，最高管理員預設為 `2600001`。
 
 ### `projects`
 
@@ -63,10 +66,11 @@
 | `member_role` | `text` | `owner`、`manager`、`editor`、`viewer` |
 | `can_view` | `boolean` | 是否可查看此工地 |
 | `can_edit` | `boolean` | 是否可編輯此工地資料 |
+| `job_title` | `text` | 該成員在此工地的職務名稱 |
 | `created_by` | `text` | 邀請人 `users.id` |
 | `created_at` | `timestamptz` | 加入時間 |
 
-建立工地時，建立者會自動成為 `owner`。`manager` 可作為共同管理者管理成員與編輯資料；`editor` 可編輯資料但不能管理成員；`viewer` 只能閱覽。
+建立工地時，建立者會自動成為 `owner`。`manager` 可作為共同管理者管理成員與編輯資料；`editor` 可編輯資料但不能管理成員；`viewer` 只能閱覽。工地建立者可替受邀成員設定該工地的職務名稱。
 
 ### `project_records`
 
@@ -330,6 +334,7 @@
   "id": "user-id",
   "email": "site-manager@example.com",
   "name": "王主任",
+  "memberNumber": "2600002",
   "organizationName": "測試分組1",
   "role": "member",
   "canView": true,
@@ -414,7 +419,8 @@
 ```json
 {
   "email": "partner@example.com",
-  "role": "manager"
+  "role": "manager",
+  "jobTitle": "工地主任"
 }
 ```
 
@@ -424,7 +430,8 @@
 
 ```json
 {
-  "role": "editor"
+  "role": "editor",
+  "jobTitle": "現場工程師"
 }
 ```
 
@@ -456,6 +463,23 @@
   "payload": {
     "location": "3F 主臥浴室",
     "type": "防水"
+  },
+  "attachments": []
+}
+```
+
+更新紀錄：
+
+`PATCH /api/projects/:projectId/records/:recordId`
+
+```json
+{
+  "title": "屋頂防水驗收",
+  "status": "未完成",
+  "payload": {
+    "stage": "屋頂防水驗收",
+    "items": ["防水試水完成"],
+    "checkedItems": []
   },
   "attachments": []
 }

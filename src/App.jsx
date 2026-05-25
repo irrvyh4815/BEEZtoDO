@@ -106,12 +106,27 @@ const mods = [
   ["photos", "照片中心"],
 ].map(([id, label]) => ({ id, label, icon: I[id] }));
 
-const APP_VERSION = "eztodo_26052504";
+const APP_VERSION = "eztodo_26052506";
 const SAMPLE_PROJECT_NAME = "範例工地：東區住宅新建工程";
 const DAILY_AI_SOURCE_MAX_BYTES = 3 * 1024 * 1024;
 
 const projectStatusOptions = ["籌備中", "進行中", "收尾中", "暫停", "結案"];
 const organizationOptions = ["測試分組1", "測試分組2", "測試分組3"];
+const memberNumberPrefix = "26";
+const projectJobTitleOptions = [
+  "工地主任",
+  "現場工程師",
+  "職安工程師",
+  "品管工程師",
+  "所長",
+  "副所長",
+  "組長",
+  "副組長",
+  "工務",
+  "監工",
+  "業主代表",
+  "協力廠商窗口",
+];
 
 const projects = [
   {
@@ -134,6 +149,7 @@ const previewUser = {
   id: "local-preview",
   email: "preview@local",
   name: "本機預覽",
+  memberNumber: "2600001",
   organizationName: "測試分組1",
   role: "preview",
 };
@@ -147,6 +163,7 @@ const adminSeedUsers = [
     id: "admin",
     name: "Renault",
     email: "irrvyh4815@gmail.com",
+    memberNumber: "2600001",
     organizationName: "測試分組1",
     role: "admin",
     canView: true,
@@ -157,6 +174,7 @@ const adminSeedUsers = [
     id: "viewer",
     name: "現場閱覽",
     email: "viewer@example.com",
+    memberNumber: "2600002",
     organizationName: "測試分組2",
     role: "member",
     canView: true,
@@ -170,12 +188,26 @@ function normalizeAccountPermissions(user) {
   const canView = Boolean(user.canView ?? true);
   return {
     ...user,
+    memberNumber: user.memberNumber || user.member_no || "",
     organizationName: user.organizationName || user.organization_name || "",
     role: isAdmin ? "admin" : user.role || "member",
     canView: isAdmin ? true : canView,
     canEdit: isAdmin ? true : canView && Boolean(user.canEdit ?? false),
     emailVerified: isAdmin ? true : Boolean(user.emailVerified ?? true),
   };
+}
+
+function memberNumberSequence(value) {
+  const match = String(value || "").match(/^\d{2}(\d{5})$/);
+  return match ? Number(match[1]) : 0;
+}
+
+function nextPreviewMemberNumber(users = []) {
+  const maxSequence = users.reduce(
+    (max, user) => Math.max(max, memberNumberSequence(user.memberNumber)),
+    0,
+  );
+  return `${memberNumberPrefix}${String(maxSequence + 1).padStart(5, "0")}`;
 }
 
 function defaultAccountDraft() {
@@ -311,19 +343,7 @@ const memos = [
   attachments: [],
 }));
 
-const checks = [
-  "基礎工程|放樣完成,開挖完成,基礎鋼筋查驗,模板查驗,混凝土澆置紀錄",
-  "結構工程|柱牆鋼筋查驗,梁版模板查驗,水電套管確認,混凝土澆置紀錄",
-  "裝修工程|水電配管完成,防水試水,磁磚鋪貼查驗,油漆底補確認",
-  "驗收交屋|缺失彙整,設備測試,清潔完成,業主複驗",
-].map((s, i) => {
-  const [stage, itemText] = s.split("|");
-  return {
-    stage,
-    done: [5, 4, 3, 1][i],
-    items: itemText.split(","),
-  };
-});
+const checks = [];
 
 const defectSeed = [
   ["3F 主臥浴室", "防水", "永信防水", "2026/05/25", "待改善", "重大"],
@@ -612,6 +632,224 @@ async function apiFetch(path, options = {}) {
   }
 
   return data;
+}
+
+function stripAttachmentFile(attachment = {}) {
+  const { file, ...rest } = attachment;
+  return rest;
+}
+
+function serializeAttachments(attachments = []) {
+  return (attachments || []).map(stripAttachmentFile);
+}
+
+function serializeRecordPayload(item = {}) {
+  const { id, recordId, attachments = [], sourceAttachment, ...payload } = item;
+  return {
+    ...payload,
+    attachments: serializeAttachments(attachments),
+    ...(sourceAttachment ? { sourceAttachment: stripAttachmentFile(sourceAttachment) } : {}),
+  };
+}
+
+function itemFromRecord(record) {
+  const payload = record.payload || {};
+  return {
+    ...payload,
+    id: record.id,
+    recordId: record.id,
+    status: payload.status ?? record.status,
+    attachments: record.attachments || payload.attachments || [],
+    createdAt: record.createdAt,
+  };
+}
+
+function localRecordsKey(project, module) {
+  return `eztodo-local-records:${project?.id || project?.name || "project"}:${module}`;
+}
+
+function seedItemsForProject(seedItems = [], project) {
+  if (!project) return [];
+  return seedItems
+    .filter((item) => matchesProject(item, project))
+    .map((item, index) => ({
+      id: item.id || `${project.id || project.name}-${index}-${Date.now()}`,
+      ...item,
+    }));
+}
+
+function useProjectRecords(project, module, seedItems = []) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    if (!project?.id && !project?.name) {
+      setItems([]);
+      return () => {
+        active = false;
+      };
+    }
+
+    if (useLocalPreview) {
+      const key = localRecordsKey(project, module);
+      const saved = window.localStorage.getItem(key);
+      if (saved) {
+        try {
+          setItems(JSON.parse(saved));
+        } catch {
+          setItems(seedItemsForProject(seedItems, project));
+        }
+      } else {
+        setItems(seedItemsForProject(seedItems, project));
+      }
+      return () => {
+        active = false;
+      };
+    }
+
+    async function loadRecords() {
+      setLoading(true);
+      setError("");
+      try {
+        const data = await apiFetch(
+          `/api/projects/${encodeURIComponent(project.id)}/records?module=${encodeURIComponent(module)}`,
+        );
+        if (active) setItems((data.records || []).map(itemFromRecord));
+      } catch (err) {
+        if (active) setError(err.message);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    loadRecords();
+    return () => {
+      active = false;
+    };
+  }, [project?.id, project?.name, module]);
+
+  function writeLocal(nextItems) {
+    if (!useLocalPreview || (!project?.id && !project?.name)) return;
+    window.localStorage.setItem(localRecordsKey(project, module), JSON.stringify(nextItems));
+  }
+
+  async function saveItem(item, options = {}) {
+    const attachments = serializeAttachments(item.attachments);
+    const nextLocal = {
+      ...item,
+      id: item.id || `${module}-${Date.now()}`,
+      attachments,
+      sourceAttachment: item.sourceAttachment ? stripAttachmentFile(item.sourceAttachment) : item.sourceAttachment,
+      projectId: project?.id,
+      projectName: project?.name,
+    };
+
+    if (useLocalPreview) {
+      setItems((current) => {
+        const nextItems = [nextLocal, ...current];
+        writeLocal(nextItems);
+        return nextItems;
+      });
+      return nextLocal;
+    }
+
+    const data = await apiFetch(`/api/projects/${encodeURIComponent(project.id)}/records`, {
+      method: "POST",
+      body: JSON.stringify({
+        module,
+        title:
+          options.title ||
+          item.title ||
+          item.name ||
+          item.stage ||
+          item.location ||
+          item.date ||
+          "未命名資料",
+        status: options.status || item.status || "",
+        payload: serializeRecordPayload({ ...item, projectId: project?.id, projectName: project?.name }),
+        attachments,
+      }),
+    });
+    const saved = itemFromRecord(data.record);
+    setItems((current) => [saved, ...current]);
+    return saved;
+  }
+
+  async function deleteItem(id) {
+    const previous = items;
+    const nextItems = items.filter((item) => item.id !== id && item.recordId !== id);
+    setItems(nextItems);
+    writeLocal(nextItems);
+
+    if (useLocalPreview) return;
+
+    try {
+      await apiFetch(
+        `/api/projects/${encodeURIComponent(project.id)}/records/${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+      );
+    } catch (err) {
+      setItems(previous);
+      setError(err.message);
+    }
+  }
+
+  async function updateItem(id, nextItem, options = {}) {
+    const normalized = {
+      ...nextItem,
+      id,
+      attachments: serializeAttachments(nextItem.attachments),
+      sourceAttachment: nextItem.sourceAttachment
+        ? stripAttachmentFile(nextItem.sourceAttachment)
+        : nextItem.sourceAttachment,
+      projectId: project?.id,
+      projectName: project?.name,
+    };
+    const previous = items;
+    const nextItems = items.map((item) =>
+      item.id === id || item.recordId === id ? normalized : item,
+    );
+    setItems(nextItems);
+    writeLocal(nextItems);
+
+    if (useLocalPreview) return normalized;
+
+    try {
+      const data = await apiFetch(
+        `/api/projects/${encodeURIComponent(project.id)}/records/${encodeURIComponent(id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            title:
+              options.title ||
+              normalized.title ||
+              normalized.name ||
+              normalized.stage ||
+              normalized.location ||
+              normalized.date ||
+              "未命名資料",
+            status: options.status || normalized.status || "",
+            payload: serializeRecordPayload(normalized),
+            attachments: normalized.attachments,
+          }),
+        },
+      );
+      const saved = itemFromRecord(data.record);
+      setItems((current) =>
+        current.map((item) => (item.id === id || item.recordId === id ? saved : item)),
+      );
+      return saved;
+    } catch (err) {
+      setItems(previous);
+      setError(err.message);
+      throw err;
+    }
+  }
+
+  return { items, loading, error, saveItem, updateItem, deleteItem, setItems };
 }
 
 console.assert(sum(claimSeed, "2026/05") === 311000, "claim total test");
@@ -1861,6 +2099,7 @@ function ProjectMembers({ project }) {
   const [members, setMembers] = useState([]);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("manager");
+  const [jobTitle, setJobTitle] = useState("工地主任");
   const [loading, setLoading] = useState(!useLocalPreview);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -1874,6 +2113,7 @@ function ProjectMembers({ project }) {
           name: project.createdByName || "本機預覽",
           email: "preview@local",
           role: "owner",
+          jobTitle: "工地建立者",
           canView: true,
           canEdit: true,
         },
@@ -1917,6 +2157,7 @@ function ProjectMembers({ project }) {
           name: cleanEmail.split("@")[0],
           email: cleanEmail,
           role,
+          jobTitle,
           canView: true,
           canEdit: role !== "viewer",
         },
@@ -1929,7 +2170,7 @@ function ProjectMembers({ project }) {
     try {
       const data = await apiFetch(`/api/projects/${encodeURIComponent(project.id)}/members`, {
         method: "POST",
-        body: JSON.stringify({ email: cleanEmail, role }),
+        body: JSON.stringify({ email: cleanEmail, role, jobTitle }),
       });
       setMembers(data.members || []);
       setEmail("");
@@ -1940,14 +2181,14 @@ function ProjectMembers({ project }) {
     }
   }
 
-  async function updateMember(member, nextRole) {
+  async function updateMember(member, nextRole, nextJobTitle = member.jobTitle || "現場工程師") {
     if (member.role === "owner") return;
 
     setError("");
     const previous = members;
     const nextMembers = members.map((item) =>
       item.userId === member.userId
-        ? { ...item, role: nextRole, canView: true, canEdit: nextRole !== "viewer" }
+        ? { ...item, role: nextRole, jobTitle: nextJobTitle, canView: true, canEdit: nextRole !== "viewer" }
         : item,
     );
     setMembers(nextMembers);
@@ -1959,7 +2200,7 @@ function ProjectMembers({ project }) {
         `/api/projects/${encodeURIComponent(project.id)}/members/${encodeURIComponent(member.userId)}`,
         {
           method: "PATCH",
-          body: JSON.stringify({ role: nextRole }),
+          body: JSON.stringify({ role: nextRole, jobTitle: nextJobTitle }),
         },
       );
       setMembers(data.members || nextMembers);
@@ -2014,7 +2255,7 @@ function ProjectMembers({ project }) {
         ) : null}
 
         {canManage ? (
-          <div className="mb-4 grid gap-3 rounded-2xl bg-slate-50 p-4 lg:grid-cols-[1fr_180px_auto]">
+          <div className="mb-4 grid gap-3 rounded-2xl bg-slate-50 p-4 lg:grid-cols-[1fr_180px_180px_auto]">
             <Input value={email} onChange={setEmail} ph="輸入已註冊帳號 Email" />
             <select
               value={role}
@@ -2024,6 +2265,17 @@ function ProjectMembers({ project }) {
               {projectMemberRoleOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={jobTitle}
+              onChange={(event) => setJobTitle(event.target.value)}
+              className="w-full rounded-xl border bg-white px-3 py-2 outline-none"
+            >
+              {projectJobTitleOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
                 </option>
               ))}
             </select>
@@ -2051,6 +2303,7 @@ function ProjectMembers({ project }) {
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="break-words font-bold">{member.name || member.email}</h3>
                       <Badge>{projectMemberRoleLabel(member.role)}</Badge>
+                      {member.jobTitle ? <Badge>{member.jobTitle}</Badge> : null}
                     </div>
                     <p className="mt-1 break-words text-sm text-slate-500">{member.email}</p>
                     <p className="mt-2 text-xs text-slate-500">
@@ -2071,17 +2324,30 @@ function ProjectMembers({ project }) {
                   ) : null}
                 </div>
                 {canManage && member.role !== "owner" ? (
-                  <select
-                    value={member.role}
-                    onChange={(event) => updateMember(member, event.target.value)}
-                    className="mt-3 w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none"
-                  >
-                    {projectMemberRoleOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <select
+                      value={member.role}
+                      onChange={(event) => updateMember(member, event.target.value, member.jobTitle)}
+                      className="w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none"
+                    >
+                      {projectMemberRoleOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={member.jobTitle || "現場工程師"}
+                      onChange={(event) => updateMember(member, member.role, event.target.value)}
+                      className="w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none"
+                    >
+                      {projectJobTitleOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 ) : null}
               </div>
             ))}
@@ -2143,7 +2409,7 @@ function Dashboard({ p, claims, memoItems, todoItems, contractItems }) {
   );
 }
 
-function Claims({ p, claims, setClaims, allClaims = claims }) {
+function Claims({ p, claims, onSave, onDelete }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState({
     period: "",
@@ -2156,7 +2422,7 @@ function Claims({ p, claims, setClaims, allClaims = claims }) {
     attachments: [],
   });
 
-  function saveClaim() {
+  async function saveClaim() {
     const next = {
       ...draft,
       period: draft.period || `第 ${claims.length + 1} 期`,
@@ -2169,7 +2435,10 @@ function Claims({ p, claims, setClaims, allClaims = claims }) {
       projectName: p.name,
     };
 
-    setClaims([next, ...allClaims]);
+    await onSave(next, {
+      title: `${next.vendor} ${next.period}`,
+      status: next.status,
+    });
     setDraft({
       period: "",
       month: p.nextClaim || "2026/05",
@@ -2209,7 +2478,7 @@ function Claims({ p, claims, setClaims, allClaims = claims }) {
               <p className="text-sm text-slate-500">本期請款</p>
               <p className="text-2xl font-bold">{twd(x.amount)}</p>
               <div className="mt-2">
-                <Del label={`${x.vendor} ${x.period}`} onClick={() => setClaims(allClaims.filter((c) => c !== x))} />
+                <Del label={`${x.vendor} ${x.period}`} onClick={() => onDelete(x.id)} />
               </div>
             </div>
           </CardContent>
@@ -2343,8 +2612,8 @@ function Contracts({ p, items, onSave, onDelete }) {
     });
   }
 
-  function saveContract() {
-    onSave({
+  async function saveContract() {
+    const next = {
       id: Date.now(),
       projectId: p.id,
       projectName: p.name,
@@ -2359,7 +2628,8 @@ function Contracts({ p, items, onSave, onDelete }) {
       address: draft.address,
       note: draft.note,
       attachments: draft.attachments || [],
-    });
+    };
+    await onSave(next, { title: next.name, status: next.status });
     resetDraft();
     setAdding(false);
   }
@@ -2539,8 +2809,8 @@ function Memos({ p, items, onSave, onDelete }) {
     attachments: [],
   });
 
-  function saveMemo() {
-    onSave({
+  async function saveMemo() {
+    const next = {
       id: Date.now(),
       projectId: p.id,
       projectName: p.name,
@@ -2550,7 +2820,8 @@ function Memos({ p, items, onSave, onDelete }) {
       note: draft.note || "未填寫內容",
       status: draft.status,
       attachments: draft.attachments || [],
-    });
+    };
+    await onSave(next, { title: next.title, status: next.status });
     setDraft({ trade: "", title: "", date: todayKey(), note: "", status: "待處理", attachments: [] });
     setAdding(false);
   }
@@ -2653,31 +2924,100 @@ function Memos({ p, items, onSave, onDelete }) {
 }
 
 function Checklists({ p }) {
-  const [items, setItems] = useState(checks);
+  const { items, saveItem, updateItem, deleteItem, loading, error } = useProjectRecords(p, "checklists", checks);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState({
     stage: "",
-    items: "",
+    items: [{ id: 1, text: "" }],
     attachments: [],
   });
+  const [formError, setFormError] = useState("");
 
-  function saveChecklist() {
-    const nextItems = draft.items
-      .split(/[\n,，]/)
-      .map((item) => item.trim())
-      .filter(Boolean);
+  function addDraftItem() {
+    setDraft((current) => ({
+      ...current,
+      items: [...current.items, { id: Date.now(), text: "" }],
+    }));
+  }
 
-    setItems([
-      {
-        stage: draft.stage || "未命名階段",
-        done: 0,
-        items: nextItems.length ? nextItems : ["新增檢核項目"],
-        attachments: draft.attachments || [],
-      },
-      ...items,
-    ]);
-    setDraft({ stage: "", items: "", attachments: [] });
+  function updateDraftItem(id, text) {
+    setDraft((current) => ({
+      ...current,
+      items: current.items.map((item) => (item.id === id ? { ...item, text } : item)),
+    }));
+  }
+
+  function removeDraftItem(id) {
+    setDraft((current) => ({
+      ...current,
+      items: current.items.length === 1 ? current.items : current.items.filter((item) => item.id !== id),
+    }));
+  }
+
+  async function saveChecklist() {
+    const nextItems = draft.items.map((item) => item.text.trim()).filter(Boolean);
+    if (!draft.stage.trim()) {
+      setFormError("請輸入階段名稱");
+      return;
+    }
+    if (!nextItems.length) {
+      setFormError("請至少新增一個檢核項目");
+      return;
+    }
+
+    const next = {
+      stage: draft.stage.trim(),
+      done: 0,
+      items: nextItems,
+      attachments: draft.attachments || [],
+      projectId: p.id,
+      projectName: p.name,
+    };
+
+    setFormError("");
+    await saveItem(next, { title: next.stage, status: "未完成" });
+    setDraft({ stage: "", items: [{ id: Date.now(), text: "" }], attachments: [] });
     setAdding(false);
+  }
+
+  async function toggleChecklistItem(stage, item, checked) {
+    const checkedItems = Array.isArray(stage.checkedItems)
+      ? stage.checkedItems
+      : stage.items.slice(0, stage.done || 0);
+    const nextCheckedItems = checked
+      ? Array.from(new Set([...checkedItems, item]))
+      : checkedItems.filter((value) => value !== item);
+    const nextStage = {
+      ...stage,
+      checkedItems: nextCheckedItems,
+      done: nextCheckedItems.length,
+    };
+
+    await updateItem(stage.id, nextStage, {
+      title: nextStage.stage,
+      status: nextStage.done >= nextStage.items.length ? "已完成" : "未完成",
+    });
+  }
+
+  function removeChecklistItem(stage, item) {
+    const checkedItems = Array.isArray(stage.checkedItems)
+      ? stage.checkedItems
+      : stage.items.slice(0, stage.done || 0);
+    const nextItems = stage.items.filter((value) => value !== item);
+    const nextCheckedItems = checkedItems.filter((value) => value !== item);
+    const nextStage = {
+      ...stage,
+      items: nextItems,
+      checkedItems: nextCheckedItems,
+      done: Math.min(nextCheckedItems.length, nextItems.length),
+    };
+
+    del(item, () =>
+      updateItem(stage.id, nextStage, {
+        title: nextStage.stage,
+        status: nextStage.done >= nextStage.items.length ? "已完成" : "未完成",
+      }),
+    );
   }
 
   return (
@@ -2688,6 +3028,16 @@ function Checklists({ p }) {
         btn="新增檢核表"
         onAdd={() => setAdding(true)}
       />
+      {error || formError ? (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error || formError}
+        </div>
+      ) : null}
+      {loading ? (
+        <div className="mb-4 rounded-2xl border border-dashed p-6 text-center text-sm text-slate-500">
+          讀取檢核表中
+        </div>
+      ) : null}
       {adding ? (
         <Card className="mb-4">
           <CardContent className="grid gap-4 p-5 md:grid-cols-2">
@@ -2703,12 +3053,32 @@ function Checklists({ p }) {
             </label>
             <label className="md:col-span-2">
               <span className="text-sm font-medium">檢核項目</span>
-              <textarea
-                value={draft.items}
-                onChange={(event) => setDraft({ ...draft, items: event.target.value })}
-                className="mt-2 min-h-28 w-full rounded-xl border px-3 py-2 outline-none"
-                placeholder="每行一項，或用逗號分隔"
-              />
+              <div className="mt-2 grid gap-2">
+                {draft.items.map((item, index) => (
+                  <div key={item.id} className="grid gap-2 sm:grid-cols-[auto_1fr_auto] sm:items-center">
+                    <span className="text-sm font-medium text-slate-500">項目 {index + 1}</span>
+                    <Input
+                      value={item.text}
+                      onChange={(value) => updateDraftItem(item.id, value)}
+                      ph="例如：防水試水完成"
+                    />
+                    <Button
+                      type="button"
+                      variant="dangerGhost"
+                      size="icon"
+                      onClick={() => removeDraftItem(item.id)}
+                      disabled={draft.items.length === 1}
+                      aria-label={`移除檢核項目 ${index + 1}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={addDraftItem}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  新增檢核項目
+                </Button>
+              </div>
             </label>
             <ImageAttachments
               className="md:col-span-2"
@@ -2730,9 +3100,12 @@ function Checklists({ p }) {
       <div className="grid gap-4 md:grid-cols-2">
         {items.map((s) => {
           const pct = s.items.length ? Math.round((s.done / s.items.length) * 100) : 0;
+          const checkedItems = Array.isArray(s.checkedItems)
+            ? s.checkedItems
+            : s.items.slice(0, s.done || 0);
 
           return (
-            <Card key={s.stage}>
+            <Card key={s.id || s.stage}>
               <CardContent className="p-5">
                 <div className="flex justify-between">
                   <div>
@@ -2741,7 +3114,7 @@ function Checklists({ p }) {
                       已完成 {s.done}/{s.items.length}
                     </p>
                   </div>
-                  <Del icon label={s.stage} onClick={() => setItems(items.filter((i) => i !== s))} />
+                  <Del icon label={s.stage} onClick={() => deleteItem(s.id)} />
                 </div>
                 <div className="mt-4 h-2 rounded-full bg-slate-100">
                   <div className="h-2 rounded-full bg-slate-900" style={{ width: `${pct}%` }} />
@@ -2751,25 +3124,16 @@ function Checklists({ p }) {
                   {s.items.map((item, i) => (
                     <div key={item} className="flex justify-between rounded-xl border p-3 text-sm">
                       <label>
-                        <input type="checkbox" defaultChecked={i < s.done} /> {item}
+                        <input
+                          type="checkbox"
+                          checked={checkedItems.includes(item)}
+                          onChange={(event) => toggleChecklistItem(s, item, event.target.checked)}
+                        />{" "}
+                        {item}
                       </label>
                       <Button
                         type="button"
-                        onClick={() =>
-                          del(item, () =>
-                            setItems(
-                              items.map((a) =>
-                                a === s
-                                  ? {
-                                      ...a,
-                                      items: a.items.filter((x) => x !== item),
-                                      done: Math.min(a.done, a.items.length - 1),
-                                    }
-                                  : a,
-                              ),
-                            ),
-                          )
-                        }
+                        onClick={() => removeChecklistItem(s, item)}
                         variant="dangerGhost"
                         size="icon"
                         aria-label={`刪除 ${item}`}
@@ -2783,6 +3147,13 @@ function Checklists({ p }) {
             </Card>
           );
         })}
+        {!loading && !items.length ? (
+          <Card className="md:col-span-2">
+            <CardContent className="p-8 text-center text-slate-500">
+              尚無階段檢核表，請新增第一份檢核表。
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
     </div>
   );
@@ -2809,7 +3180,13 @@ function Daily({ p }) {
   const [aiStatus, setAiStatus] = useState("idle");
   const [aiMessage, setAiMessage] = useState("");
   const [aiSummary, setAiSummary] = useState(null);
-  const [savedReports, setSavedReports] = useState([]);
+  const {
+    items: savedReports,
+    saveItem: saveDailyRecord,
+    deleteItem: deleteDailyRecord,
+    loading: dailyLoading,
+    error: dailyError,
+  } = useProjectRecords(p, "daily", []);
 
   const upd = (set, id, key, value) =>
     set((items) => items.map((x) => (x.id === id ? { ...x, [key]: value } : x)));
@@ -2895,7 +3272,7 @@ function Daily({ p }) {
     }
   }
 
-  function saveDaily() {
+  async function saveDaily() {
     const totalWorkers = work.reduce((total, row) => total + Number(row.workers || 0), 0);
     const next = {
       id: Date.now(),
@@ -2909,12 +3286,17 @@ function Daily({ p }) {
       work: work.map(({ id, ...row }) => row),
       materials: mat.map(({ id, ...row }) => row),
       equipment: eq.map(({ id, ...row }) => row),
-      sourceAttachment: paperReport,
-      attachments: sitePhotos,
+      sourceAttachment: paperReport ? stripAttachmentFile(paperReport) : null,
+      attachments: serializeAttachments(sitePhotos),
       aiSummary,
+      projectId: p.id,
+      projectName: p.name,
     };
 
-    setSavedReports([next, ...savedReports]);
+    await saveDailyRecord(next, {
+      title: `${next.date} 施工日報`,
+      status: next.weather,
+    });
     resetDaily();
   }
 
@@ -2926,6 +3308,11 @@ function Daily({ p }) {
         btn="新增日報"
         onAdd={resetDaily}
       />
+      {dailyError ? (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {dailyError}
+        </div>
+      ) : null}
       <Card>
         <CardContent className="grid gap-4 p-5 md:grid-cols-2">
           <div className="md:col-span-2 rounded-2xl border bg-white p-4">
@@ -3124,6 +3511,11 @@ function Daily({ p }) {
           </ActionBar>
         </CardContent>
       </Card>
+      {dailyLoading ? (
+        <div className="mt-4 rounded-2xl border border-dashed p-6 text-center text-sm text-slate-500">
+          讀取施工日報中
+        </div>
+      ) : null}
       {savedReports.length ? (
         <div className="mt-4 grid gap-3">
           {savedReports.map((report) => (
@@ -3144,10 +3536,17 @@ function Daily({ p }) {
                   ) : null}
                   <AttachmentSummary attachments={report.attachments} />
                 </div>
-                <Badge>已暫存</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge>已儲存</Badge>
+                  <Del icon label={`${report.date} 施工日報`} onClick={() => deleteDailyRecord(report.id)} />
+                </div>
               </CardContent>
             </Card>
           ))}
+        </div>
+      ) : !dailyLoading ? (
+        <div className="mt-4 rounded-2xl border border-dashed p-6 text-center text-sm text-slate-500">
+          尚無已儲存施工日報。
         </div>
       ) : null}
     </div>
@@ -3187,8 +3586,9 @@ function Rows({ title, list, add, del: remove, render }) {
 }
 
 function Defects({ p }) {
-  const [items, setItems] = useState(defectSeed);
+  const { items, saveItem, deleteItem, loading, error } = useProjectRecords(p, "defects", defectSeed);
   const [adding, setAdding] = useState(false);
+  const [formError, setFormError] = useState("");
   const [draft, setDraft] = useState({
     location: "",
     type: "",
@@ -3199,7 +3599,7 @@ function Defects({ p }) {
     attachments: [],
   });
 
-  function saveDefect() {
+  async function saveDefect() {
     const next = {
       id: Date.now(),
       location: draft.location || "未填寫位置",
@@ -3211,7 +3611,11 @@ function Defects({ p }) {
       attachments: draft.attachments || [],
     };
 
-    setItems([next, ...items]);
+    setFormError("");
+    await saveItem(next, {
+      title: `${next.location} ${next.type}`,
+      status: next.status,
+    });
     setDraft({
       location: "",
       type: "",
@@ -3231,6 +3635,16 @@ function Defects({ p }) {
         sub={`目前工地：${p.name}`}
         onAdd={() => setAdding(true)}
       />
+      {error || formError ? (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error || formError}
+        </div>
+      ) : null}
+      {loading ? (
+        <div className="mb-4 rounded-2xl border border-dashed p-6 text-center text-sm text-slate-500">
+          讀取缺失資料中
+        </div>
+      ) : null}
 
       {adding ? (
         <Card className="mb-4">
@@ -3329,10 +3743,17 @@ function Defects({ p }) {
               <p className="text-sm text-slate-500">改善期限：{x.due}</p>
               <AttachmentSummary attachments={x.attachments} />
             </div>
-            <Del label={`${x.location} ${x.type}`} onClick={() => setItems(items.filter((i) => i !== x))} />
+            <Del label={`${x.location} ${x.type}`} onClick={() => deleteItem(x.id)} />
           </CardContent>
         </Card>
         ))}
+        {!loading && !items.length ? (
+          <Card>
+            <CardContent className="p-8 text-center text-slate-500">
+              尚無缺失資料，請新增第一筆紀錄。
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
     </div>
   );
@@ -3370,8 +3791,8 @@ function Todos({ p, items, onSave, onDelete }) {
     });
   }
 
-  function saveTodo() {
-    onSave({
+  async function saveTodo() {
+    const next = {
       id: Date.now(),
       projectId: p.id,
       projectName: p.name,
@@ -3381,7 +3802,8 @@ function Todos({ p, items, onSave, onDelete }) {
       status: draft.status || "一般",
       note: draft.note,
       attachments: draft.attachments || [],
-    });
+    };
+    await onSave(next, { title: next.title, status: next.status });
     resetDraft();
     setAdding(false);
   }
@@ -3548,7 +3970,7 @@ function Schedule({ p, items, onSave, onDelete }) {
     setDraft(createScheduleDraft(p));
   }
 
-  function saveSchedule() {
+  async function saveSchedule() {
     const { start, end } = normalizeDateRange(draft.startDate, draft.endDate);
     const trade = draft.trade || "未分類工種";
     const next = {
@@ -3563,7 +3985,7 @@ function Schedule({ p, items, onSave, onDelete }) {
       name: draft.name || `${trade}預定進度`,
     };
 
-    onSave(next);
+    await onSave(next, { title: next.name, status: next.status });
     resetDraft();
     setAdding(false);
   }
@@ -3839,6 +4261,7 @@ function Schedule({ p, items, onSave, onDelete }) {
 }
 
 function Manual() {
+  const [showVersions, setShowVersions] = useState(false);
   const manualSections = [
     {
       title: "開始使用",
@@ -3885,6 +4308,7 @@ function Manual() {
         "右上角帳號設定可修改暱稱、變更密碼或登出。",
         "系統管理員可進入系統管理中心查詢與管理所有註冊帳號。",
         "帳號會記錄所屬單位，註冊與新增帳號時都需先選擇分組。",
+        "帳號列表依會員編號與所屬單位排序，可用搜尋與單位篩選快速查找人員。",
         "帳號列表採收合式呈現，展開後可重設密碼、調整權限或重寄驗證信。",
         "工地總覽可管理工地成員，只有被加入該工地的帳號能看到與操作資料。",
       ],
@@ -3893,6 +4317,26 @@ function Manual() {
   const versionNotes = [
     {
       version: APP_VERSION,
+      title: "檢核表與表單儲存調整",
+      items: [
+        "階段檢核表移除範例資料，改由使用者自行建立。",
+        "檢核項目改成逐列新增，不需要再用逗號或換行整理。",
+        "工地內表單改寫入 project_records，刷新頁面後仍會保留已儲存資料。",
+        "工地成員新增職務名稱欄位，可搭配權限一起管理。",
+        "版本更新紀錄移到獨立頁面，操作手冊閱讀更清楚。",
+      ],
+    },
+    {
+      version: "eztodo_26052505",
+      title: "會員編號與管理名冊調整",
+      items: [
+        "所有帳號新增會員編號，最高管理員從 2600001 開始，後續帳號依序產生。",
+        "系統管理中心的搜尋功能移到帳號列表上方，並新增所屬單位篩選。",
+        "登出、刪除、移除等重要操作統一使用紅色系按鈕，並改善手機版按鈕排列。",
+      ],
+    },
+    {
+      version: "eztodo_26052504",
       title: "一般帳號設定與註冊驗證調整",
       items: [
         "一般帳號右上角新增帳號設定，可自行修改暱稱、變更密碼與登出。",
@@ -3949,12 +4393,55 @@ function Manual() {
     },
   ];
 
+  if (showVersions) {
+    return (
+      <div>
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">版本更新紀錄</h1>
+            <p className="mt-1 text-sm text-slate-500">
+              目前版本：{APP_VERSION}。新增功能上線時，請同步補上操作入口與注意事項。
+            </p>
+          </div>
+          <Button type="button" variant="outline" onClick={() => setShowVersions(false)}>
+            返回操作手冊
+          </Button>
+        </div>
+        <div className="grid gap-3">
+          {versionNotes.map((note) => (
+            <Card key={note.version}>
+              <CardContent className="p-5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="font-bold">{note.title}</h2>
+                  <Badge>{note.version}</Badge>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {note.items.map((item) => (
+                    <p key={item} className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                      {item}
+                    </p>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <Header
         title="操作手冊"
-        sub={`目前版本：${APP_VERSION}。此頁會隨版本更新補充新增功能與操作說明。`}
+        sub={`目前版本：${APP_VERSION}。功能操作說明會隨版本更新補充。`}
       />
+      <div className="mb-4 flex justify-end">
+        <Button type="button" variant="outline" onClick={() => setShowVersions(true)}>
+          <FileText className="mr-2 h-4 w-4" />
+          查看版本更新
+        </Button>
+      </div>
       <div className="grid gap-4 lg:grid-cols-2">
         {manualSections.map((section) => (
           <Card key={section.title}>
@@ -3975,41 +4462,17 @@ function Manual() {
           </Card>
         ))}
       </div>
-      <Card className="mt-4">
-        <CardContent className="p-5">
-          <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
-            <div>
-              <h2 className="text-lg font-bold">版本更新紀錄</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                新增功能上線時，請同步在此補上操作入口與注意事項。
-              </p>
-            </div>
-            <Badge>{APP_VERSION}</Badge>
-          </div>
-          <div className="mt-4 grid gap-3">
-            {versionNotes.map((note) => (
-              <div key={note.version} className="rounded-2xl border p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-bold">{note.title}</h3>
-                  <Badge>{note.version}</Badge>
-                </div>
-                <div className="mt-3 space-y-2">
-                  {note.items.map((item) => (
-                    <p key={item} className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                      {item}
-                    </p>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }
 
-function Placeholder({ title }) {
+const placeholderModuleMap = {
+  重要公告: "announcements",
+  材料庫存: "materials",
+  照片中心: "photos",
+};
+
+function Placeholder({ title, p }) {
   const schema =
     {
       重要公告: {
@@ -4084,16 +4547,26 @@ function Placeholder({ title }) {
   }, { attachments: [] });
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState(emptyDraft);
-  const [records, setRecords] = useState([]);
+  const {
+    items: records,
+    saveItem,
+    deleteItem,
+    loading,
+    error,
+  } = useProjectRecords(p, placeholderModuleMap[title] || `placeholder-${title}`, []);
 
-  function saveRecord() {
+  async function saveRecord() {
     const next = {
-      id: Date.now(),
       ...draft,
       name: draft.name || `${title}資料`,
+      projectId: p.id,
+      projectName: p.name,
     };
 
-    setRecords([next, ...records]);
+    await saveItem(next, {
+      title: next.name,
+      status: next.status || "",
+    });
     setDraft(emptyDraft);
     setAdding(false);
   }
@@ -4102,10 +4575,15 @@ function Placeholder({ title }) {
     <div>
       <Header
         title={title}
-        sub="此頁先建立互動表單，後續接資料庫"
+        sub={`目前工地：${p.name}`}
         btn={schema.btn}
         onAdd={() => setAdding(true)}
       />
+      {error ? (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      ) : null}
       {adding ? (
         <Card className="mb-4">
           <CardContent className="grid gap-4 p-5 md:grid-cols-2">
@@ -4157,7 +4635,11 @@ function Placeholder({ title }) {
         </Card>
       ) : null}
       <div className="grid gap-4">
-        {records.length ? (
+        {loading ? (
+          <Card>
+            <CardContent className="p-8 text-center text-slate-500">讀取{title}資料中</CardContent>
+          </Card>
+        ) : records.length ? (
           records.map((record) => (
             <Card key={record.id}>
               <CardContent className="flex flex-col justify-between gap-4 p-5 sm:flex-row">
@@ -4175,7 +4657,7 @@ function Placeholder({ title }) {
                   </p>
                   <AttachmentSummary attachments={record.attachments} />
                 </div>
-                <Del label={record.name} onClick={() => setRecords(records.filter((item) => item !== record))} />
+                <Del label={record.name} onClick={() => deleteItem(record.id)} />
               </CardContent>
             </Card>
           ))
@@ -4199,6 +4681,7 @@ function AdminPanel({ currentUser, onLogout, onUserUpdate, open, onOpenChange })
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState("");
   const [accountQuery, setAccountQuery] = useState("");
+  const [organizationFilter, setOrganizationFilter] = useState("all");
   const [draft, setDraft] = useState(defaultAccountDraft);
   const [profileName, setProfileName] = useState(currentUser?.name || "");
   const [passwordOpen, setPasswordOpen] = useState(false);
@@ -4253,10 +4736,22 @@ function AdminPanel({ currentUser, onLogout, onUserUpdate, open, onOpenChange })
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [open, onOpenChange]);
 
-  const filteredUsers = users.filter((user) => {
+  const sortedUsers = [...users].sort((a, b) => {
+    const organizationCompare = String(a.organizationName || "").localeCompare(
+      String(b.organizationName || ""),
+      "zh-Hant",
+    );
+    if (organizationCompare) return organizationCompare;
+    return String(a.memberNumber || "").localeCompare(String(b.memberNumber || ""));
+  });
+  const filteredUsers = sortedUsers.filter((user) => {
     const keyword = accountQuery.trim().toLowerCase();
+    const matchesOrganization =
+      organizationFilter === "all" || user.organizationName === organizationFilter;
+    if (!matchesOrganization) return false;
     if (!keyword) return true;
     return [
+      user.memberNumber,
       user.name,
       user.email,
       user.organizationName,
@@ -4291,6 +4786,7 @@ function AdminPanel({ currentUser, onLogout, onUserUpdate, open, onOpenChange })
     const next = normalizeAccountPermissions({
       ...draft,
       id: `user-${Date.now()}`,
+      memberNumber: nextPreviewMemberNumber(users),
       name: draft.name || "未命名使用者",
       email: draft.email || `user-${Date.now()}@example.com`,
     });
@@ -4534,27 +5030,10 @@ function AdminPanel({ currentUser, onLogout, onUserUpdate, open, onOpenChange })
               <Stat title="建立工地" value={totalProjects} desc="所有帳號建立總數" icon={Building2} />
             </div>
 
-            <Card className="mb-4">
-              <CardContent className="grid gap-3 p-4 lg:grid-cols-[1fr_auto]">
-                <div className="flex items-center gap-3 rounded-2xl border bg-slate-50 px-3 py-2">
-                  <Search className="h-5 w-5 text-slate-400" />
-                  <input
-                    value={accountQuery}
-                    onChange={(event) => setAccountQuery(event.target.value)}
-                    className="w-full bg-transparent text-sm outline-none"
-                    placeholder="搜尋暱稱、Email、所屬單位、角色或驗證狀態"
-                  />
-                </div>
-                <Button type="button" variant="outline" onClick={() => setAccountQuery("")}>
-                  清除搜尋
-                </Button>
-              </CardContent>
-            </Card>
-
             <div className="grid gap-3">
               <AccordionSection
                 title="目前帳號設定"
-                desc={`${currentUser?.name || "使用者"}｜${currentUser?.organizationName || "未設定單位"}｜${currentUser?.email || "未登入"}`}
+                desc={`${currentUser?.memberNumber || "未編號"}｜${currentUser?.name || "使用者"}｜${currentUser?.organizationName || "未設定單位"}｜${currentUser?.email || "未登入"}`}
                 open={sections.account}
                 onToggle={() => toggleSection("account")}
               >
@@ -4732,12 +5211,45 @@ function AdminPanel({ currentUser, onLogout, onUserUpdate, open, onOpenChange })
 
               <AccordionSection
                 title="帳號列表"
-                desc="搜尋、查看帳號建立工地數與最後登入時間，並調整角色、權限或密碼"
+                desc="依會員編號與所屬單位排序，方便搜尋、查看與管理人員"
                 meta={`${filteredUsers.length}/${users.length} 個帳號`}
                 open={sections.users}
                 onToggle={() => toggleSection("users")}
               >
                 <div className="grid gap-3">
+                  <div className="grid gap-3 rounded-2xl bg-slate-50 p-3 lg:grid-cols-[1fr_180px_auto]">
+                    <div className="flex items-center gap-3 rounded-xl border bg-white px-3 py-2">
+                      <Search className="h-5 w-5 text-slate-400" />
+                      <input
+                        value={accountQuery}
+                        onChange={(event) => setAccountQuery(event.target.value)}
+                        className="w-full bg-transparent text-sm outline-none"
+                        placeholder="搜尋會員編號、暱稱、Email、所屬單位或角色"
+                      />
+                    </div>
+                    <select
+                      value={organizationFilter}
+                      onChange={(event) => setOrganizationFilter(event.target.value)}
+                      className="w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none"
+                    >
+                      <option value="all">全部單位</option>
+                      {organizationOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setAccountQuery("");
+                        setOrganizationFilter("all");
+                      }}
+                    >
+                      清除搜尋
+                    </Button>
+                  </div>
               {filteredUsers.map((user) => {
                 const isAdmin = user.role === "admin";
                 const userOpen = openUserId === user.id;
@@ -4752,6 +5264,7 @@ function AdminPanel({ currentUser, onLogout, onUserUpdate, open, onOpenChange })
                     >
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="font-bold">{user.name}</h3>
+                        <Badge>會員 {user.memberNumber || "未編號"}</Badge>
                         {user.organizationName ? <Badge>{user.organizationName}</Badge> : null}
                         <Badge>{isAdmin ? "管理員" : "一般帳號"}</Badge>
                         {isAdmin ? <Badge>最高權限</Badge> : null}
@@ -4762,7 +5275,7 @@ function AdminPanel({ currentUser, onLogout, onUserUpdate, open, onOpenChange })
                       </div>
                       <p className="mt-1 text-sm text-slate-500">{user.email}</p>
                       <p className="mt-1 text-xs text-slate-500">
-                        所屬單位：{user.organizationName || "未設定"}｜建立工地 {Number(user.createdProjectCount || 0)} 個｜最後登入：{formatDateTime(user.lastLoginAt)}
+                        會員編號：{user.memberNumber || "未編號"}｜所屬單位：{user.organizationName || "未設定"}｜建立工地 {Number(user.createdProjectCount || 0)} 個｜最後登入：{formatDateTime(user.lastLoginAt)}
                       </p>
                     </button>
                     <button
@@ -4776,7 +5289,11 @@ function AdminPanel({ currentUser, onLogout, onUserUpdate, open, onOpenChange })
                   </div>
                   {userOpen ? (
                   <>
-                  <div className="mt-4 grid gap-2 rounded-2xl bg-slate-50 p-4 text-sm sm:grid-cols-2 xl:grid-cols-5">
+                  <div className="mt-4 grid gap-2 rounded-2xl bg-slate-50 p-4 text-sm sm:grid-cols-2 xl:grid-cols-6">
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">會員編號</p>
+                      <p className="mt-1 font-bold">{user.memberNumber || "未編號"}</p>
+                    </div>
                     <div>
                       <p className="text-xs font-medium text-slate-500">建立工地</p>
                       <p className="mt-1 font-bold">{Number(user.createdProjectCount || 0)} 個</p>
@@ -4897,7 +5414,7 @@ function AdminPanel({ currentUser, onLogout, onUserUpdate, open, onOpenChange })
               <div>
                 <h2 className="text-lg font-bold">帳號設定</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  {currentUser?.name || "使用者"}｜{currentUser?.organizationName || "未設定單位"}｜{currentUser?.email || "未登入"}
+                  {currentUser?.memberNumber || "未編號"}｜{currentUser?.name || "使用者"}｜{currentUser?.organizationName || "未設定單位"}｜{currentUser?.email || "未登入"}
                 </p>
               </div>
               <button
@@ -5013,13 +5530,13 @@ export default function App() {
   );
   const [active, setActive] = useState("dashboard");
   const [p, setP] = useState(null);
-  const [claims, setClaims] = useState(claimSeed);
-  const [contractItems, setContractItems] = useState(contractSeed);
-  const [memoItems, setMemoItems] = useState(memos);
-  const [scheduleItems, setScheduleItems] = useState(scheduleSeed);
-  const [todoItems, setTodoItems] = useState(todoSeed);
   const [moduleListOpen, setModuleListOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const claimRecords = useProjectRecords(p, "claims", claimSeed);
+  const contractRecords = useProjectRecords(p, "contracts", contractSeed);
+  const memoRecords = useProjectRecords(p, "memos", memos);
+  const scheduleRecords = useProjectRecords(p, "schedule", scheduleSeed);
+  const todoRecords = useProjectRecords(p, "todos", todoSeed);
 
   useEffect(() => {
     if (useLocalPreview) return;
@@ -5065,11 +5582,11 @@ export default function App() {
 
   const page = useMemo(() => {
     if (!p) return null;
-    const projectContracts = contractItems.filter((item) => matchesProject(item, p));
-    const projectClaims = claims.filter((item) => matchesProject(item, p));
-    const projectMemos = memoItems.filter((item) => matchesProject(item, p));
-    const projectScheduleItems = scheduleItems.filter((item) => matchesProject(item, p));
-    const projectTodoItems = todoItems.filter((item) => matchesProject(item, p));
+    const projectContracts = contractRecords.items;
+    const projectClaims = claimRecords.items;
+    const projectMemos = memoRecords.items;
+    const projectScheduleItems = scheduleRecords.items;
+    const projectTodoItems = todoRecords.items;
 
     if (active === "manual") return <Manual />;
     if (active === "dashboard") {
@@ -5083,14 +5600,23 @@ export default function App() {
         />
       );
     }
-    if (active === "claims") return <Claims p={p} claims={projectClaims} setClaims={setClaims} allClaims={claims} />;
+    if (active === "claims") {
+      return (
+        <Claims
+          p={p}
+          claims={projectClaims}
+          onSave={(item, options) => claimRecords.saveItem(item, options)}
+          onDelete={claimRecords.deleteItem}
+        />
+      );
+    }
     if (active === "contracts") {
       return (
         <Contracts
           p={p}
           items={projectContracts}
-          onSave={(item) => setContractItems([item, ...contractItems])}
-          onDelete={(id) => setContractItems(contractItems.filter((item) => item.id !== id))}
+          onSave={(item, options) => contractRecords.saveItem(item, options)}
+          onDelete={contractRecords.deleteItem}
         />
       );
     }
@@ -5099,8 +5625,8 @@ export default function App() {
         <Memos
           p={p}
           items={projectMemos}
-          onSave={(item) => setMemoItems([item, ...memoItems])}
-          onDelete={(id) => setMemoItems(memoItems.filter((item) => item.id !== id))}
+          onSave={(item, options) => memoRecords.saveItem(item, options)}
+          onDelete={memoRecords.deleteItem}
         />
       );
     }
@@ -5110,8 +5636,8 @@ export default function App() {
         <Schedule
           p={p}
           items={projectScheduleItems}
-          onSave={(item) => setScheduleItems([item, ...scheduleItems])}
-          onDelete={(id) => setScheduleItems(scheduleItems.filter((item) => item.id !== id))}
+          onSave={(item, options) => scheduleRecords.saveItem(item, options)}
+          onDelete={scheduleRecords.deleteItem}
         />
       );
     }
@@ -5122,13 +5648,21 @@ export default function App() {
         <Todos
           p={p}
           items={projectTodoItems}
-          onSave={(item) => setTodoItems([item, ...todoItems])}
-          onDelete={(id) => setTodoItems(todoItems.filter((item) => item.id !== id))}
+          onSave={(item, options) => todoRecords.saveItem(item, options)}
+          onDelete={todoRecords.deleteItem}
         />
       );
     }
-    return <Placeholder title={mods.find((x) => x.id === active)?.label || "模組"} />;
-  }, [active, p, claims, contractItems, memoItems, scheduleItems, todoItems]);
+    return <Placeholder p={p} title={mods.find((x) => x.id === active)?.label || "模組"} />;
+  }, [
+    active,
+    p,
+    claimRecords.items,
+    contractRecords.items,
+    memoRecords.items,
+    scheduleRecords.items,
+    todoRecords.items,
+  ]);
 
   if (auth.loading) {
     return <LoadingScreen />;

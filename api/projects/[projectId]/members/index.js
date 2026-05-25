@@ -23,6 +23,11 @@ function normalizeRole(role) {
   return ["manager", "editor", "viewer"].includes(role) ? role : "viewer";
 }
 
+function normalizeJobTitle(jobTitle) {
+  const clean = String(jobTitle || "").trim();
+  return clean || "現場工程師";
+}
+
 export default {
   async fetch(request) {
     if (!["GET", "POST"].includes(request.method)) {
@@ -51,7 +56,7 @@ export default {
       if (!memberUser) {
         throw new ApiError(
           404,
-          "找不到此 Email 的已註冊帳號，請先請對方完成註冊。",
+          "找不到此 Email 的註冊帳號，請先請對方完成註冊。",
           "MEMBER_USER_NOT_FOUND",
         );
       }
@@ -60,6 +65,7 @@ export default {
         role: normalizeRole(body.role),
         canView: true,
         canEdit: body.role === "viewer" ? Boolean(body.canEdit) : true,
+        jobTitle: normalizeJobTitle(body.jobTitle),
         createdBy: user.id,
       });
 

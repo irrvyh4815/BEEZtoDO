@@ -27,6 +27,11 @@ function normalizeRole(role) {
   return ["manager", "editor", "viewer"].includes(role) ? role : "viewer";
 }
 
+function normalizeJobTitle(jobTitle) {
+  const clean = String(jobTitle || "").trim();
+  return clean || "現場工程師";
+}
+
 export default {
   async fetch(request) {
     if (!["PATCH", "DELETE"].includes(request.method)) {
@@ -45,7 +50,7 @@ export default {
       if (request.method === "DELETE") {
         const removed = await removeProjectMember(projectId, userId);
         if (!removed) {
-          throw new ApiError(400, "無法移除工地擁有者或找不到成員", "PROJECT_MEMBER_REMOVE_FAILED");
+          throw new ApiError(400, "無法移除此工地成員", "PROJECT_MEMBER_REMOVE_FAILED");
         }
         return json({ members: await listProjectMembers(projectId) });
       }
@@ -55,6 +60,7 @@ export default {
         role: normalizeRole(body.role),
         canView: true,
         canEdit: body.role === "viewer" ? Boolean(body.canEdit) : true,
+        jobTitle: normalizeJobTitle(body.jobTitle),
       });
 
       return json({ members: await listProjectMembers(projectId) });

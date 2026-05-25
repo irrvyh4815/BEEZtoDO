@@ -1,5 +1,15 @@
-import { deleteProjectRecord, ensureSchema } from "../../../_lib/db.js";
-import { ApiError, json, jsonError, methodNotAllowed } from "../../../_lib/http.js";
+import {
+  deleteProjectRecord,
+  ensureSchema,
+  updateProjectRecord,
+} from "../../../_lib/db.js";
+import {
+  ApiError,
+  json,
+  jsonError,
+  methodNotAllowed,
+  readJson,
+} from "../../../_lib/http.js";
 import { requireProjectAccess } from "../../../_lib/permissions.js";
 
 function idsFromUrl(url) {
@@ -15,21 +25,37 @@ function idsFromUrl(url) {
 
 export default {
   async fetch(request) {
-    if (request.method !== "DELETE") return methodNotAllowed(["DELETE"]);
+    if (!["PATCH", "DELETE"].includes(request.method)) {
+      return methodNotAllowed(["PATCH", "DELETE"]);
+    }
 
     try {
       await ensureSchema();
 
       const { projectId, recordId } = idsFromUrl(request.url);
       if (!projectId || !recordId) {
-        throw new ApiError(400, "缺少工地或資料 ID", "RECORD_ID_REQUIRED");
+        throw new ApiError(400, "缺少工地或紀錄 ID", "RECORD_ID_REQUIRED");
       }
 
       await requireProjectAccess(request, projectId, "edit");
 
+      if (request.method === "PATCH") {
+        const body = await readJson(request);
+        if (!body.title?.trim()) {
+          throw new ApiError(400, "請輸入紀錄標題", "RECORD_TITLE_REQUIRED");
+        }
+
+        const record = await updateProjectRecord(projectId, recordId, body);
+        if (!record) {
+          throw new ApiError(404, "找不到紀錄", "RECORD_NOT_FOUND");
+        }
+
+        return json({ record });
+      }
+
       const deleted = await deleteProjectRecord(projectId, recordId);
       if (!deleted) {
-        throw new ApiError(404, "找不到表單資料", "RECORD_NOT_FOUND");
+        throw new ApiError(404, "找不到紀錄", "RECORD_NOT_FOUND");
       }
 
       return json({ ok: true });

@@ -90,6 +90,7 @@ export function mapProjectMember(row) {
     userId: row.user_id,
     name: row.name,
     email: row.email,
+    jobTitle: row.job_title || "",
     role,
     canView: role === "owner" ? true : Boolean(row.can_view),
     canEdit: ["owner", "manager", "editor"].includes(role)
@@ -120,6 +121,7 @@ export function mapUser(row) {
     id: row.id,
     email: row.email,
     name: row.name,
+    memberNumber: row.member_no || "",
     organizationName: row.organization_name || "",
     role: row.role,
     canView: isAdmin ? true : row.can_view,
@@ -138,6 +140,49 @@ function hashVerificationToken(token) {
 
 function emailVerificationDays() {
   return Math.max(Number(process.env.EMAIL_VERIFICATION_DAYS || 2), 1);
+}
+
+function memberNumberPrefix(date = new Date()) {
+  return String(date.getFullYear()).slice(-2);
+}
+
+function formatMemberNumber(sequence, prefix = memberNumberPrefix()) {
+  return `${prefix}${String(sequence).padStart(5, "0")}`;
+}
+
+async function nextMemberNumber() {
+  const prefix = memberNumberPrefix();
+  const result = await query(
+    `select coalesce(max(substring(member_no from 3)::int), 0) as max_sequence
+     from users
+     where member_no ~ $1`,
+    [`^${prefix}[0-9]{5}$`],
+  );
+  return formatMemberNumber(Number(result.rows[0]?.max_sequence || 0) + 1, prefix);
+}
+
+async function backfillUserMemberNumbers() {
+  const prefix = memberNumberPrefix();
+  await query(
+    `with base as (
+       select coalesce(max(substring(member_no from 3)::int), 0) as offset
+       from users
+       where member_no ~ $2
+     ),
+     ranked as (
+       select id,
+              row_number() over (
+                order by case when role = 'admin' then 0 else 1 end, created_at asc, id asc
+              ) as sequence
+       from users
+       where member_no is null or member_no = ''
+     )
+     update users u
+     set member_no = $1 || lpad((base.offset + ranked.sequence)::text, 5, '0')
+     from ranked, base
+     where u.id = ranked.id`,
+    [prefix, `^${prefix}[0-9]{5}$`],
+  );
 }
 
 async function seedAdmin() {
@@ -162,11 +207,11 @@ async function seedAdmin() {
 
   await query(
     `insert into users (
-       id, email, name, organization_name, password_hash, role, can_view, can_edit,
+       id, email, name, member_no, organization_name, password_hash, role, can_view, can_edit,
        email_verified, email_verified_at
      )
-     values ($1, lower($2), $3, $4, $5, 'admin', true, true, true, now())`,
-    [randomUUID(), email, name, "測試分組1", await hashPassword(password)],
+     values ($1, lower($2), $3, $4, $5, $6, 'admin', true, true, true, now())`,
+    [randomUUID(), email, name, formatMemberNumber(1), "測試分組1", await hashPassword(password)],
   );
 }
 
@@ -254,9 +299,9 @@ async function backfillProjectOwnership() {
 
   await query(
     `insert into project_members (
-       project_id, user_id, member_role, can_view, can_edit, created_by
+       project_id, user_id, member_role, can_view, can_edit, job_title, created_by
      )
-     select id, owner_id, 'owner', true, true, owner_id
+     select id, owner_id, 'owner', true, true, '工地建立者', owner_id
      from projects
      where owner_id is not null
      on conflict (project_id, user_id) do nothing`,
@@ -269,6 +314,7 @@ async function initializeSchema() {
       id text primary key,
       email text unique not null,
       name text not null,
+      member_no text unique,
       organization_name text not null default '',
       password_hash text not null,
       role text not null default 'member',
@@ -286,7 +332,9 @@ async function initializeSchema() {
 
   await query("alter table users add column if not exists can_view boolean not null default true");
   await query("alter table users add column if not exists can_edit boolean not null default false");
+  await query("alter table users add column if not exists member_no text");
   await query("alter table users add column if not exists organization_name text not null default ''");
+  await query("update users set organization_name = '測試分組1' where organization_name is null or organization_name = ''");
   await query("alter table users add column if not exists email_verified boolean");
   await query("alter table users add column if not exists email_verified_at timestamptz");
   await query("alter table users add column if not exists email_verification_token_hash text");
@@ -299,6 +347,9 @@ async function initializeSchema() {
   );
   await query("alter table users alter column email_verified set default false");
   await query("alter table users alter column email_verified set not null");
+  await seedAdmin();
+  await backfillUserMemberNumbers();
+  await query("create unique index if not exists users_member_no_idx on users (member_no) where member_no is not null");
 
   await query(`
     create table if not exists projects (
@@ -330,6 +381,7 @@ async function initializeSchema() {
       member_role text not null default 'viewer',
       can_view boolean not null default true,
       can_edit boolean not null default false,
+      job_title text not null default '',
       created_by text references users(id) on delete set null,
       created_at timestamptz not null default now(),
       primary key (project_id, user_id)
@@ -340,6 +392,16 @@ async function initializeSchema() {
     create index if not exists project_members_user_idx
     on project_members (user_id, project_id)
   `);
+  await query("alter table project_members add column if not exists job_title text not null default ''");
+  await query(
+    `update project_members
+     set job_title = case
+       when member_role = 'owner' then '工地建立者'
+       when job_title = '' then '現場工程師'
+       else job_title
+     end
+     where job_title is null or job_title = ''`,
+  );
 
   await query(`
     create table if not exists project_records (
@@ -361,7 +423,6 @@ async function initializeSchema() {
     on project_records (project_id, module, created_at desc)
   `);
 
-  await seedAdmin();
   await syncSampleProjects();
   await seedProjects();
   await backfillProjectOwnership();
@@ -407,17 +468,19 @@ export async function insertUser({
   const normalizedCanEdit =
     normalizedRole === "admin" ? true : normalizedCanView && Boolean(canEdit);
   const normalizedEmailVerified = normalizedRole === "admin" ? true : Boolean(emailVerified);
+  const memberNumber = await nextMemberNumber();
   const result = await query(
     `insert into users (
-       id, email, name, organization_name, password_hash, role, can_view, can_edit,
+       id, email, name, member_no, organization_name, password_hash, role, can_view, can_edit,
        email_verified, email_verified_at
      )
-     values ($1, lower($2), $3, $4, $5, $6, $7, $8, $9, case when $9 then now() else null end)
+     values ($1, lower($2), $3, $4, $5, $6, $7, $8, $9, $10, case when $10 then now() else null end)
      returning *`,
     [
       randomUUID(),
       email,
       name,
+      memberNumber,
       organizationName,
       passwordHash,
       normalizedRole,
@@ -475,7 +538,7 @@ export async function listUsers() {
      from users u
      left join projects p on p.created_by = u.id
      group by u.id
-     order by u.role = 'admin' desc, u.created_at asc`,
+     order by u.organization_name asc, u.member_no asc nulls last, u.created_at asc`,
   );
   return result.rows.map(mapUser);
 }
@@ -598,13 +661,14 @@ export async function insertProject(project, userId) {
   if (userId) {
     await query(
       `insert into project_members (
-         project_id, user_id, member_role, can_view, can_edit, created_by
+         project_id, user_id, member_role, can_view, can_edit, job_title, created_by
        )
-       values ($1, $2, 'owner', true, true, $2)
+       values ($1, $2, 'owner', true, true, '工地建立者', $2)
        on conflict (project_id, user_id) do update
        set member_role = 'owner',
            can_view = true,
-           can_edit = true`,
+           can_edit = true,
+           job_title = '工地建立者'`,
       [projectId, userId],
     );
   }
@@ -665,6 +729,31 @@ export async function insertProjectRecord(projectId, record, userId) {
   return mapRecord(result.rows[0]);
 }
 
+export async function updateProjectRecord(projectId, recordId, record) {
+  const payload = record.payload || {};
+  const attachments = record.attachments || [];
+  const result = await query(
+    `update project_records
+     set title = $3,
+         status = $4,
+         payload = $5::jsonb,
+         attachments = $6::jsonb,
+         updated_at = now()
+     where project_id = $1 and id = $2
+     returning *`,
+    [
+      projectId,
+      recordId,
+      record.title,
+      record.status || "",
+      JSON.stringify(payload),
+      JSON.stringify(attachments),
+    ],
+  );
+
+  return result.rows[0] ? mapRecord(result.rows[0]) : null;
+}
+
 export async function deleteProjectRecord(projectId, recordId) {
   const result = await query(
     "delete from project_records where project_id = $1 and id = $2",
@@ -695,6 +784,7 @@ export async function listProjectMembers(projectId) {
             pm.member_role,
             pm.can_view,
             pm.can_edit,
+            pm.job_title,
             pm.created_at,
             u.name,
             u.email
@@ -722,9 +812,9 @@ export async function upsertProjectMember(projectId, userId, options = {}) {
 
   const result = await query(
     `insert into project_members (
-       project_id, user_id, member_role, can_view, can_edit, created_by
+       project_id, user_id, member_role, can_view, can_edit, job_title, created_by
      )
-     values ($1, $2, $3, $4, $5, $6)
+     values ($1, $2, $3, $4, $5, $6, $7)
      on conflict (project_id, user_id) do update
      set member_role = case
            when project_members.member_role = 'owner' then 'owner'
@@ -737,6 +827,10 @@ export async function upsertProjectMember(projectId, userId, options = {}) {
          can_edit = case
            when project_members.member_role = 'owner' then true
            else excluded.can_edit
+         end,
+         job_title = case
+           when project_members.member_role = 'owner' then project_members.job_title
+           else excluded.job_title
          end
      returning *`,
     [
@@ -745,6 +839,7 @@ export async function upsertProjectMember(projectId, userId, options = {}) {
       permissions.role,
       permissions.canView,
       permissions.canEdit,
+      options.jobTitle || options.job_title || "現場工程師",
       options.createdBy || null,
     ],
   );
