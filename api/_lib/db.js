@@ -120,6 +120,7 @@ export function mapUser(row) {
     id: row.id,
     email: row.email,
     name: row.name,
+    organizationName: row.organization_name || "",
     role: row.role,
     canView: isAdmin ? true : row.can_view,
     canEdit: isAdmin ? true : row.can_edit,
@@ -161,11 +162,11 @@ async function seedAdmin() {
 
   await query(
     `insert into users (
-       id, email, name, password_hash, role, can_view, can_edit,
+       id, email, name, organization_name, password_hash, role, can_view, can_edit,
        email_verified, email_verified_at
      )
-     values ($1, lower($2), $3, $4, 'admin', true, true, true, now())`,
-    [randomUUID(), email, name, await hashPassword(password)],
+     values ($1, lower($2), $3, $4, $5, 'admin', true, true, true, now())`,
+    [randomUUID(), email, name, "測試分組1", await hashPassword(password)],
   );
 }
 
@@ -268,6 +269,7 @@ async function initializeSchema() {
       id text primary key,
       email text unique not null,
       name text not null,
+      organization_name text not null default '',
       password_hash text not null,
       role text not null default 'member',
       can_view boolean not null default true,
@@ -284,6 +286,7 @@ async function initializeSchema() {
 
   await query("alter table users add column if not exists can_view boolean not null default true");
   await query("alter table users add column if not exists can_edit boolean not null default false");
+  await query("alter table users add column if not exists organization_name text not null default ''");
   await query("alter table users add column if not exists email_verified boolean");
   await query("alter table users add column if not exists email_verified_at timestamptz");
   await query("alter table users add column if not exists email_verification_token_hash text");
@@ -392,6 +395,7 @@ export async function findUserById(id) {
 export async function insertUser({
   email,
   name,
+  organizationName = "",
   passwordHash,
   role = "member",
   canView = true,
@@ -405,15 +409,16 @@ export async function insertUser({
   const normalizedEmailVerified = normalizedRole === "admin" ? true : Boolean(emailVerified);
   const result = await query(
     `insert into users (
-       id, email, name, password_hash, role, can_view, can_edit,
+       id, email, name, organization_name, password_hash, role, can_view, can_edit,
        email_verified, email_verified_at
      )
-     values ($1, lower($2), $3, $4, $5, $6, $7, $8, case when $8 then now() else null end)
+     values ($1, lower($2), $3, $4, $5, $6, $7, $8, $9, case when $9 then now() else null end)
      returning *`,
     [
       randomUUID(),
       email,
       name,
+      organizationName,
       passwordHash,
       normalizedRole,
       normalizedCanView,

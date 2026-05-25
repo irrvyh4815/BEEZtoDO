@@ -46,6 +46,7 @@ export function publicUser(user) {
     id: user.id,
     email: user.email,
     name: user.name,
+    organizationName: user.organization_name ?? user.organizationName ?? "",
     role: user.role,
     canView: isAdmin ? true : user.can_view ?? user.canView ?? true,
     canEdit: isAdmin ? true : user.can_edit ?? user.canEdit ?? false,
@@ -54,7 +55,11 @@ export function publicUser(user) {
 }
 
 export function emailVerificationRequired() {
-  return String(process.env.EMAIL_VERIFICATION_REQUIRED || "").toLowerCase() === "true";
+  const configured = process.env.EMAIL_VERIFICATION_REQUIRED;
+  if (configured === undefined || configured === "") {
+    return Boolean(process.env.VERCEL || process.env.NODE_ENV === "production");
+  }
+  return String(configured).toLowerCase() === "true";
 }
 
 export function createSessionToken(user) {
@@ -65,6 +70,7 @@ export function createSessionToken(user) {
       sub: user.id,
       email: user.email,
       name: user.name,
+      organizationName: user.organization_name ?? user.organizationName ?? "",
       role: user.role,
       iat: now,
       exp: now + days * 24 * 60 * 60,

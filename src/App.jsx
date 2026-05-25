@@ -86,11 +86,12 @@ const mods = [
   ["photos", "照片中心"],
 ].map(([id, label]) => ({ id, label, icon: I[id] }));
 
-const APP_VERSION = "eztodo_26052503";
+const APP_VERSION = "eztodo_26052504";
 const SAMPLE_PROJECT_NAME = "範例工地：東區住宅新建工程";
 const DAILY_AI_SOURCE_MAX_BYTES = 3 * 1024 * 1024;
 
 const projectStatusOptions = ["籌備中", "進行中", "收尾中", "暫停", "結案"];
+const organizationOptions = ["測試分組1", "測試分組2", "測試分組3"];
 
 const projects = [
   {
@@ -113,6 +114,7 @@ const previewUser = {
   id: "local-preview",
   email: "preview@local",
   name: "本機預覽",
+  organizationName: "測試分組1",
   role: "preview",
 };
 const previewProjects = projects.map((project, index) => ({
@@ -125,6 +127,7 @@ const adminSeedUsers = [
     id: "admin",
     name: "Renault",
     email: "irrvyh4815@gmail.com",
+    organizationName: "測試分組1",
     role: "admin",
     canView: true,
     canEdit: true,
@@ -134,6 +137,7 @@ const adminSeedUsers = [
     id: "viewer",
     name: "現場閱覽",
     email: "viewer@example.com",
+    organizationName: "測試分組2",
     role: "member",
     canView: true,
     canEdit: false,
@@ -146,6 +150,7 @@ function normalizeAccountPermissions(user) {
   const canView = Boolean(user.canView ?? true);
   return {
     ...user,
+    organizationName: user.organizationName || user.organization_name || "",
     role: isAdmin ? "admin" : user.role || "member",
     canView: isAdmin ? true : canView,
     canEdit: isAdmin ? true : canView && Boolean(user.canEdit ?? false),
@@ -157,6 +162,7 @@ function defaultAccountDraft() {
   return {
     name: "",
     email: "",
+    organizationName: organizationOptions[0],
     password: "",
     role: "member",
     canView: true,
@@ -926,6 +932,7 @@ function AccordionSection({ title, desc, meta, open, onToggle, children }) {
 function LoginScreen({ onLogin }) {
   const [mode, setMode] = useState("login");
   const [name, setName] = useState("");
+  const [organizationName, setOrganizationName] = useState(organizationOptions[0]);
   const [email, setEmail] = useState("admin@eztodo.local");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -950,6 +957,9 @@ function LoginScreen({ onLogin }) {
         if (!name.trim()) {
           throw new Error("請輸入暱稱 / 姓名");
         }
+        if (!organizationName) {
+          throw new Error("請選擇所屬單位");
+        }
         if (password.length < 8) {
           throw new Error("密碼至少需要 8 碼");
         }
@@ -959,7 +969,7 @@ function LoginScreen({ onLogin }) {
 
         const data = await apiFetch("/api/auth/register", {
           method: "POST",
-          body: JSON.stringify({ name, email, password }),
+          body: JSON.stringify({ name, email, password, organizationName }),
         });
 
         if (data.emailVerificationRequired) {
@@ -1078,7 +1088,7 @@ function LoginScreen({ onLogin }) {
             <p className="mt-1 text-sm text-slate-500">
               {mode === "login"
                 ? "請輸入帳號密碼進入你的工地工作台。"
-                : "註冊後可建立自己的工地；若有信箱驗證，請先完成驗證再登入。"}
+                : "註冊後系統會寄送驗證信，完成信箱驗證後才能登入。"}
             </p>
             <form onSubmit={handleSubmit} className="mt-5 grid gap-4">
               {mode === "register" ? (
@@ -1087,6 +1097,23 @@ function LoginScreen({ onLogin }) {
                   <div className="mt-2">
                     <Input value={name} onChange={setName} ph="例如：王主任" />
                   </div>
+                </label>
+              ) : null}
+              {mode === "register" ? (
+                <label>
+                  <span className="text-sm font-medium">所屬單位</span>
+                  <select
+                    value={organizationName}
+                    onChange={(event) => setOrganizationName(event.target.value)}
+                    className="mt-2 w-full rounded-xl border bg-white px-3 py-2 outline-none"
+                    required
+                  >
+                    {organizationOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               ) : null}
               <label>
@@ -1361,7 +1388,7 @@ function ProjectSelect({ onSelect }) {
         <div>
           <h1 className="text-3xl font-bold">請先創建/選擇工地</h1>
           <p className="mt-2 text-sm text-slate-300">
-            只會顯示你建立或被邀請共同管理的工地；系統管理員可檢視全部工地。
+            只會顯示你建立或被邀請共同管理的工地。
           </p>
         </div>
         <Button
@@ -1944,7 +1971,7 @@ function ProjectMembers({ project }) {
           <div>
             <h2 className="text-lg font-bold">工地成員與隔離權限</h2>
             <p className="mt-1 text-sm text-slate-500">
-              只有工地建立者、共同管理者與被邀請成員能看到此工地；系統管理員可檢視全部工地。
+              只有工地建立者、共同管理者與被邀請成員能看到此工地。
             </p>
           </div>
           <Button type="button" variant="outline" disabled={loading} onClick={loadMembers}>
@@ -3820,10 +3847,11 @@ function Manual() {
     },
     {
       title: "帳號管理",
-      desc: "管理員可建立帳號、調整權限，並管理信箱驗證狀態。",
+      desc: "一般使用者可管理自己的帳號；系統管理員另有完整管理中心。",
       items: [
-        "右上角管理可開啟帳號與權限管理。",
-        "目前帳號設定可修改暱稱、變更密碼或登出。",
+        "右上角帳號設定可修改暱稱、變更密碼或登出。",
+        "系統管理員可進入系統管理中心查詢與管理所有註冊帳號。",
+        "帳號會記錄所屬單位，註冊與新增帳號時都需先選擇分組。",
         "帳號列表採收合式呈現，展開後可重設密碼、調整權限或重寄驗證信。",
         "工地總覽可管理工地成員，只有被加入該工地的帳號能看到與操作資料。",
       ],
@@ -3832,6 +3860,16 @@ function Manual() {
   const versionNotes = [
     {
       version: APP_VERSION,
+      title: "一般帳號設定與註冊驗證調整",
+      items: [
+        "一般帳號右上角新增帳號設定，可自行修改暱稱、變更密碼與登出。",
+        "工地選擇頁簡化權限說明文字。",
+        "註冊帳號新增所屬單位下拉選單，目前提供測試分組1、測試分組2、測試分組3。",
+        "正式環境預設要求註冊後完成信箱驗證才能登入。",
+      ],
+    },
+    {
+      version: "eztodo_26052503",
       title: "獨立系統管理中心",
       items: [
         "右上角系統管理改為全頁管理中心，僅系統管理員可使用。",
@@ -3844,7 +3882,7 @@ function Manual() {
       title: "多客戶工地隔離與共同管理",
       items: [
         "新增工地建立者與 project_members 成員權限模型。",
-        "工地列表改為只顯示自己建立或被邀請加入的工地；系統管理員仍可看到全部工地。",
+        "工地列表改為只顯示自己建立或被邀請加入的工地。",
         "工地總覽新增成員管理，可邀請已註冊帳號成為共同管理者、可編輯或僅閱覽。",
         "選擇工地頁新增刷新工地按鈕，讓被邀請人可立即重新讀取新工地。",
       ],
@@ -4120,7 +4158,7 @@ function Placeholder({ title }) {
   );
 }
 
-function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
+function AdminPanel({ currentUser, onLogout, onUserUpdate, open, onOpenChange }) {
   const panelRef = useRef(null);
   const triggerRef = useRef(null);
   const [users, setUsers] = useState(adminSeedUsers.map(normalizeAccountPermissions));
@@ -4148,8 +4186,10 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
     setProfileName(currentUser?.name || "");
   }, [currentUser?.name]);
 
+  const isSystemAdmin = useLocalPreview || currentUser?.role === "admin";
+
   useEffect(() => {
-    if (!open || useLocalPreview) return;
+    if (!open || useLocalPreview || currentUser?.role !== "admin") return;
 
     let active = true;
     apiFetch("/api/users")
@@ -4180,12 +4220,16 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [open, onOpenChange]);
 
-  if (!useLocalPreview && currentUser?.role !== "admin") return null;
-
   const filteredUsers = users.filter((user) => {
     const keyword = accountQuery.trim().toLowerCase();
     if (!keyword) return true;
-    return [user.name, user.email, user.role, user.emailVerified ? "verified" : "unverified"]
+    return [
+      user.name,
+      user.email,
+      user.organizationName,
+      user.role,
+      user.emailVerified ? "verified" : "unverified",
+    ]
       .join(" ")
       .toLowerCase()
       .includes(keyword);
@@ -4204,6 +4248,10 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
 
     if (!draft.password || draft.password.length < 8) {
       setError("初始密碼至少需要 8 碼");
+      return;
+    }
+    if (!draft.organizationName) {
+      setError("請選擇所屬單位");
       return;
     }
 
@@ -4328,17 +4376,23 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
     }
 
     if (useLocalPreview) {
+      onUserUpdate?.({ ...currentUser, name });
       setNotice("本機預覽已模擬更新暱稱");
       return;
     }
 
     try {
       setBusy("profile-name");
-      const data = await apiFetch(`/api/users/${currentUser.id}`, {
+      const data = await apiFetch("/api/auth/profile", {
         method: "PATCH",
         body: JSON.stringify({ name }),
       });
-      setUsers(users.map((user) => (user.id === data.user.id ? data.user : user)));
+      setUsers(
+        users.map((user) =>
+          user.id === data.user.id ? normalizeAccountPermissions({ ...user, ...data.user }) : user,
+        ),
+      );
+      onUserUpdate?.(data.user);
       setNotice("暱稱已更新，重新整理或下次登入後會套用到全站");
     } catch (err) {
       setError(err.message);
@@ -4404,11 +4458,11 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
         onClick={() => onOpenChange(!open)}
         className="fixed right-4 top-4 z-50 inline-flex items-center gap-2 rounded-full border bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-lg hover:bg-slate-50"
       >
-        <ShieldCheck className="h-4 w-4" />
-        系統管理
+        {isSystemAdmin ? <ShieldCheck className="h-4 w-4" /> : <UserRound className="h-4 w-4" />}
+        {isSystemAdmin ? "系統管理" : "帳號設定"}
       </button>
 
-      {open ? (
+      {open ? isSystemAdmin ? (
         <div ref={panelRef} className="fixed inset-0 z-50 overflow-auto bg-slate-50">
           <div className="sticky top-0 z-10 border-b bg-white/95 p-4 shadow-sm backdrop-blur">
             <div className="mx-auto flex max-w-7xl items-start justify-between gap-4">
@@ -4455,7 +4509,7 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
                     value={accountQuery}
                     onChange={(event) => setAccountQuery(event.target.value)}
                     className="w-full bg-transparent text-sm outline-none"
-                    placeholder="搜尋暱稱、Email、角色或驗證狀態"
+                    placeholder="搜尋暱稱、Email、所屬單位、角色或驗證狀態"
                   />
                 </div>
                 <Button type="button" variant="outline" onClick={() => setAccountQuery("")}>
@@ -4467,7 +4521,7 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
             <div className="grid gap-3">
               <AccordionSection
                 title="目前帳號設定"
-                desc={`${currentUser?.name || "使用者"}｜${currentUser?.email || "未登入"}`}
+                desc={`${currentUser?.name || "使用者"}｜${currentUser?.organizationName || "未設定單位"}｜${currentUser?.email || "未登入"}`}
                 open={sections.account}
                 onToggle={() => toggleSection("account")}
               >
@@ -4579,6 +4633,19 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
                     onChange={(value) => setDraft({ ...draft, email: value })}
                     ph="Email 帳號"
                   />
+                  <select
+                    value={draft.organizationName}
+                    onChange={(event) =>
+                      setDraft({ ...draft, organizationName: event.target.value })
+                    }
+                    className="w-full rounded-xl border bg-white px-3 py-2 outline-none"
+                  >
+                    {organizationOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
                   <Input
                     type="password"
                     value={draft.password}
@@ -4652,6 +4719,7 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
                     >
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="font-bold">{user.name}</h3>
+                        {user.organizationName ? <Badge>{user.organizationName}</Badge> : null}
                         <Badge>{isAdmin ? "管理員" : "一般帳號"}</Badge>
                         {isAdmin ? <Badge>最高權限</Badge> : null}
                         {!isAdmin ? <Badge>{user.canEdit ? "可編輯" : user.canView ? "僅閱覽" : "未開放"}</Badge> : null}
@@ -4661,7 +4729,7 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
                       </div>
                       <p className="mt-1 text-sm text-slate-500">{user.email}</p>
                       <p className="mt-1 text-xs text-slate-500">
-                        建立工地 {Number(user.createdProjectCount || 0)} 個｜最後登入：{formatDateTime(user.lastLoginAt)}
+                        所屬單位：{user.organizationName || "未設定"}｜建立工地 {Number(user.createdProjectCount || 0)} 個｜最後登入：{formatDateTime(user.lastLoginAt)}
                       </p>
                     </button>
                     <button
@@ -4675,10 +4743,14 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
                   </div>
                   {userOpen ? (
                   <>
-                  <div className="mt-4 grid gap-2 rounded-2xl bg-slate-50 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="mt-4 grid gap-2 rounded-2xl bg-slate-50 p-4 text-sm sm:grid-cols-2 xl:grid-cols-5">
                     <div>
                       <p className="text-xs font-medium text-slate-500">建立工地</p>
                       <p className="mt-1 font-bold">{Number(user.createdProjectCount || 0)} 個</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">所屬單位</p>
+                      <p className="mt-1 font-bold">{user.organizationName || "未設定"}</p>
                     </div>
                     <div>
                       <p className="text-xs font-medium text-slate-500">最後登入</p>
@@ -4781,6 +4853,116 @@ function AdminPanel({ currentUser, onLogout, open, onOpenChange }) {
               })}
                 </div>
               </AccordionSection>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div ref={panelRef} className="fixed right-4 top-16 z-50 w-[calc(100vw-2rem)] max-w-md rounded-2xl border bg-white shadow-xl">
+          <div className="border-b p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold">帳號設定</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {currentUser?.name || "使用者"}｜{currentUser?.organizationName || "未設定單位"}｜{currentUser?.email || "未登入"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onOpenChange(false)}
+                className="rounded-lg px-2 py-1 text-sm text-slate-500 hover:bg-slate-100"
+              >
+                關閉
+              </button>
+            </div>
+          </div>
+          <div className="p-4">
+            {error ? (
+              <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {error}
+              </div>
+            ) : null}
+            {notice ? (
+              <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                {notice}
+              </div>
+            ) : null}
+            <div className="grid gap-3">
+              <label>
+                <span className="text-sm font-medium">暱稱</span>
+                <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <Input value={profileName} onChange={setProfileName} ph="暱稱" />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={saveProfileName}
+                    disabled={busy === "profile-name"}
+                  >
+                    {busy === "profile-name" ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="mr-2 h-4 w-4" />
+                    )}
+                    儲存
+                  </Button>
+                </div>
+              </label>
+
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPasswordOpen(!passwordOpen)}
+                className="w-full"
+              >
+                <ShieldCheck className="mr-2 h-4 w-4" />
+                {passwordOpen ? "收合密碼變更" : "變更密碼"}
+              </Button>
+
+              {passwordOpen ? (
+                <div className="grid gap-3 rounded-2xl bg-slate-50 p-4">
+                  <Input
+                    type="password"
+                    value={passwordDraft.currentPassword}
+                    onChange={(value) =>
+                      setPasswordDraft({ ...passwordDraft, currentPassword: value })
+                    }
+                    ph="目前密碼"
+                  />
+                  <Input
+                    type="password"
+                    value={passwordDraft.newPassword}
+                    onChange={(value) =>
+                      setPasswordDraft({ ...passwordDraft, newPassword: value })
+                    }
+                    ph="新密碼，至少 8 碼"
+                  />
+                  <Input
+                    type="password"
+                    value={passwordDraft.confirmPassword}
+                    onChange={(value) =>
+                      setPasswordDraft({ ...passwordDraft, confirmPassword: value })
+                    }
+                    ph="再次輸入新密碼"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={changeOwnPassword}
+                    disabled={busy === "change-password"}
+                  >
+                    {busy === "change-password" ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <ShieldCheck className="mr-2 h-4 w-4" />
+                    )}
+                    更新密碼
+                  </Button>
+                </div>
+              ) : null}
+
+              <Button type="button" variant="outline" onClick={onLogout}>
+                <LogOut className="mr-2 h-4 w-4" />
+                登出帳號
+              </Button>
             </div>
           </div>
         </div>
@@ -4936,6 +5118,7 @@ export default function App() {
         <AdminPanel
           currentUser={auth.user}
           onLogout={handleLogout}
+          onUserUpdate={(user) => setAuth((current) => ({ ...current, user }))}
           open={adminOpen}
           onOpenChange={setAdminOpen}
         />
@@ -4960,6 +5143,7 @@ export default function App() {
       <AdminPanel
         currentUser={auth.user}
         onLogout={handleLogout}
+        onUserUpdate={(user) => setAuth((current) => ({ ...current, user }))}
         open={adminOpen}
         onOpenChange={setAdminOpen}
       />

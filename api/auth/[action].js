@@ -21,6 +21,7 @@ import {
   insertUser,
   markUserLogin,
   updateUserPassword,
+  updateUserProfile,
   verifyEmailToken,
 } from "../_lib/db.js";
 import {
@@ -31,6 +32,19 @@ import {
   readJson,
   sessionCookie,
 } from "../_lib/http.js";
+
+const organizationOptions = new Set(["測試分組1", "測試分組2", "測試分組3"]);
+
+function normalizeOrganizationName(value) {
+  const organizationName = String(value || "").trim();
+  if (!organizationName) {
+    throw new ApiError(400, "請選擇所屬單位", "ORGANIZATION_REQUIRED");
+  }
+  if (!organizationOptions.has(organizationName)) {
+    throw new ApiError(400, "所屬單位選項無效", "ORGANIZATION_INVALID");
+  }
+  return organizationName;
+}
 
 function actionFromUrl(url) {
   const parts = new URL(url).pathname.split("/").filter(Boolean);
@@ -112,10 +126,11 @@ async function me(request) {
 async function register(request) {
   if (request.method !== "POST") return methodNotAllowed(["POST"]);
 
-  const { email, password, name } = await readJson(request);
+  const { email, password, name, organizationName } = await readJson(request);
   if (!email?.trim() || !password || !name?.trim()) {
     throw new ApiError(400, "請輸入姓名、帳號與密碼", "REGISTER_FIELDS_REQUIRED");
   }
+  const cleanOrganizationName = normalizeOrganizationName(organizationName);
   if (password.length < 8) {
     throw new ApiError(400, "密碼至少需要 8 碼", "PASSWORD_TOO_SHORT");
   }
@@ -139,6 +154,7 @@ async function register(request) {
   const user = await insertUser({
     email,
     name,
+    organizationName: cleanOrganizationName,
     passwordHash: await hashPassword(password),
     canView: true,
     canEdit: true,
@@ -199,6 +215,28 @@ async function changePassword(request) {
   return json({
     user: await updateUserPassword(user.id, await hashPassword(newPassword)),
   });
+}
+
+async function updateProfile(request) {
+  if (!["PATCH", "POST"].includes(request.method)) {
+    return methodNotAllowed(["PATCH", "POST"]);
+  }
+
+  const sessionUser = requireUser(request);
+  await ensureSchema();
+
+  const { name } = await readJson(request);
+  const cleanName = String(name || "").trim();
+  if (!cleanName) {
+    throw new ApiError(400, "請輸入暱稱", "USER_NAME_REQUIRED");
+  }
+
+  const user = await updateUserProfile(sessionUser.id, { name: cleanName });
+  if (!user) {
+    throw new ApiError(404, "找不到帳號", "USER_NOT_FOUND");
+  }
+
+  return json({ user: publicUser(user) });
 }
 
 async function resendVerification(request) {
@@ -289,6 +327,7 @@ export default {
       if (action === "me") return await me(request);
       if (action === "register") return await register(request);
       if (action === "password") return await changePassword(request);
+      if (action === "profile") return await updateProfile(request);
       if (action === "resend-verification") return await resendVerification(request);
       if (action === "verify-email") return await verifyEmail(request);
 

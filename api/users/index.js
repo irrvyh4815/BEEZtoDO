@@ -19,6 +19,19 @@ import {
   readJson,
 } from "../_lib/http.js";
 
+const organizationOptions = new Set(["測試分組1", "測試分組2", "測試分組3"]);
+
+function normalizeOrganizationName(value) {
+  const organizationName = String(value || "").trim();
+  if (!organizationName) {
+    throw new ApiError(400, "請選擇所屬單位", "ORGANIZATION_REQUIRED");
+  }
+  if (!organizationOptions.has(organizationName)) {
+    throw new ApiError(400, "所屬單位選項無效", "ORGANIZATION_INVALID");
+  }
+  return organizationName;
+}
+
 function requireAdmin(request) {
   const user = requireUser(request);
   if (user.role !== "admin") {
@@ -45,6 +58,7 @@ export default {
       if (!body.email?.trim() || !body.name?.trim() || !body.password) {
         throw new ApiError(400, "請輸入姓名、帳號與密碼", "USER_FIELDS_REQUIRED");
       }
+      const organizationName = normalizeOrganizationName(body.organizationName);
       if (body.password.length < 8) {
         throw new ApiError(400, "密碼至少需要 8 碼", "PASSWORD_TOO_SHORT");
       }
@@ -63,6 +77,7 @@ export default {
       const user = await insertUser({
         email: body.email,
         name: body.name,
+        organizationName,
         passwordHash: await hashPassword(body.password),
         role: body.role || "member",
         canView: body.canView ?? true,

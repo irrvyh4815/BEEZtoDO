@@ -13,6 +13,7 @@
 | `id` | `text` | 使用者 ID |
 | `email` | `text` | 登入帳號，唯一 |
 | `name` | `text` | 使用者暱稱 / 顯示名稱 |
+| `organization_name` | `text` | 所屬單位 / 分組名稱 |
 | `password_hash` | `text` | bcrypt hash 後的密碼 |
 | `role` | `text` | `admin` 或 `member` |
 | `can_view` | `boolean` | 是否可閱覽資料 |
@@ -53,7 +54,7 @@
 
 ### `project_members`
 
-工地成員與多客戶隔離權限。一般使用者只能讀取自己建立或被加入的工地；系統管理員仍可檢視全部工地。
+工地成員與多客戶隔離權限。一般使用者只能讀取自己建立或被加入的工地。
 
 | 欄位 | 型別 | 說明 |
 | --- | --- | --- |
@@ -259,6 +260,7 @@
 ```json
 {
   "name": "Renault",
+  "organizationName": "測試分組1",
   "email": "renault@example.com",
   "password": "至少 8 碼"
 }
@@ -328,6 +330,7 @@
   "id": "user-id",
   "email": "site-manager@example.com",
   "name": "王主任",
+  "organizationName": "測試分組1",
   "role": "member",
   "canView": true,
   "canEdit": false,
@@ -343,6 +346,7 @@
 ```json
 {
   "name": "王主任",
+  "organizationName": "測試分組1",
   "email": "site-manager@example.com",
   "password": "至少 8 碼",
   "role": "member",
@@ -397,7 +401,7 @@
 
 `DELETE /api/projects/:projectId`
 
-`GET /api/projects` 會依目前登入者過濾工地：系統管理員可取得全部，一般帳號只能取得 `project_members` 內已有權限的工地。
+`GET /api/projects` 會依目前登入者與 `project_members` 權限回傳可操作工地。
 
 ### 工地成員
 

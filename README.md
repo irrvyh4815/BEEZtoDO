@@ -90,7 +90,7 @@ ADMIN_NAME=系統管理員
 SESSION_DAYS=7
 OPENAI_API_KEY=
 OPENAI_DAILY_REPORT_MODEL=gpt-5.4-mini
-EMAIL_VERIFICATION_REQUIRED=false
+EMAIL_VERIFICATION_REQUIRED=true
 EMAIL_VERIFICATION_DAYS=2
 RESEND_API_KEY=
 EMAIL_FROM=EZtoDO工程管理程式 <noreply@example.com>
@@ -101,7 +101,7 @@ APP_ORIGIN=https://your-production-domain.vercel.app
 
 `OPENAI_API_KEY` 用於施工日報的紙本照片 AI 判讀；未設定時，其他功能仍可正常使用，只是 AI 判讀按鈕會回報尚未設定。
 
-`EMAIL_VERIFICATION_REQUIRED=true` 會啟用信箱驗證；一般帳號必須點擊驗證信後才能登入。啟用前請先設定 `RESEND_API_KEY`、`EMAIL_FROM` 與正式網址 `APP_ORIGIN`。
+`EMAIL_VERIFICATION_REQUIRED=true` 會啟用信箱驗證；一般帳號註冊後必須點擊驗證信才能登入。正式上線建議保持 `true`，並先設定 `RESEND_API_KEY`、`EMAIL_FROM` 與正式網址 `APP_ORIGIN`。
 
 第一次登入時，系統會自動建立資料表，並建立預設管理員。
 
