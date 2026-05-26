@@ -110,7 +110,7 @@ const mods = [
   ["photos", "照片中心"],
 ].map(([id, label]) => ({ id, label, icon: I[id] }));
 
-const APP_VERSION = "eztodo_26052605";
+const APP_VERSION = "eztodo_26052606";
 const SAMPLE_PROJECT_NAME = "範例工地：東區住宅新建工程";
 const DAILY_AI_SOURCE_MAX_BYTES = 3 * 1024 * 1024;
 
@@ -250,8 +250,21 @@ const claimSeed = [
     trade: "水電工程",
     vendor: "宏鑫水電",
     contract: "水電配管工程",
+    contractId: "contract-1",
+    sourceType: "contract",
+    contractAmount: 1200000,
+    grossAmount: 200000,
+    retentionAmount: 10000,
+    cleaningFee: 3000,
+    insuranceFee: 2000,
+    otherDeduction: 0,
     amount: 185000,
+    netAmount: 185000,
     status: "待付款",
+    details: [
+      { item: "2F 水電配管", quantity: 1, unit: "式", unitPrice: 120000, amount: 120000, note: "" },
+      { item: "弱電箱與管線調整", quantity: 1, unit: "式", unitPrice: 80000, amount: 80000, note: "" },
+    ],
     projectName: SAMPLE_PROJECT_NAME,
   },
   {
@@ -260,8 +273,19 @@ const claimSeed = [
     trade: "泥作工程",
     vendor: "順發泥作",
     contract: "浴室泥作工程",
+    sourceType: "temporary",
+    contractAmount: 180000,
+    grossAmount: 132000,
+    retentionAmount: 6000,
+    cleaningFee: 0,
+    insuranceFee: 0,
+    otherDeduction: 0,
     amount: 126000,
+    netAmount: 126000,
     status: "審核中",
+    details: [
+      { item: "浴室泥作修補", quantity: 1, unit: "式", unitPrice: 132000, amount: 132000, note: "臨時追加" },
+    ],
     projectName: SAMPLE_PROJECT_NAME,
   },
   {
@@ -270,8 +294,20 @@ const claimSeed = [
     trade: "防水工程",
     vendor: "永信防水",
     contract: "防水工程",
+    contractId: "contract-2",
+    sourceType: "contract",
+    contractAmount: 360000,
+    grossAmount: 105000,
+    retentionAmount: 5000,
+    cleaningFee: 1000,
+    insuranceFee: 1000,
+    otherDeduction: 0,
     amount: 98000,
+    netAmount: 98000,
     status: "待送審",
+    details: [
+      { item: "3F 浴室防水", quantity: 1, unit: "式", unitPrice: 105000, amount: 105000, note: "" },
+    ],
     projectName: SAMPLE_PROJECT_NAME,
   },
 ];
@@ -611,15 +647,18 @@ const scheduleStatusClass = {
   延遲: "border-red-200 bg-red-50 text-red-700",
   已完成: "border-emerald-200 bg-emerald-50 text-emerald-700",
 };
+const claimStatusOptions = ["待送審", "審核中", "退回修正", "待付款", "已付款", "已結案"];
+const paidClaimStatuses = new Set(["已付款", "已結案"]);
+const approvedClaimStatuses = new Set(["待付款", "已付款", "已結案"]);
 
 const sum = (arr, m) =>
-  arr.filter((x) => x.month === m).reduce((a, b) => a + b.amount, 0);
+  arr.filter((x) => x.month === m).reduce((a, b) => a + claimGrossAmount(b), 0);
 
 const byTrade = (arr, m) =>
   arr
     .filter((x) => x.month === m)
     .reduce((o, x) => {
-      o[x.trade] = (o[x.trade] || 0) + x.amount;
+      o[x.trade] = (o[x.trade] || 0) + claimGrossAmount(x);
       return o;
     }, {});
 
@@ -869,8 +908,8 @@ function useProjectRecords(project, module, seedItems = []) {
   return { items, loading, error, saveItem, updateItem, deleteItem, setItems };
 }
 
-console.assert(sum(claimSeed, "2026/05") === 311000, "claim total test");
-console.assert(byTrade(claimSeed, "2026/05")["水電工程"] === 185000, "trade summary test");
+console.assert(sum(claimSeed, "2026/05") === 332000, "claim total test");
+console.assert(byTrade(claimSeed, "2026/05")["水電工程"] === 200000, "trade summary test");
 
 function Badge({ children }) {
   return (
@@ -2051,21 +2090,251 @@ function RecordExportToolbar({ controls, placeholder = "搜尋資料內容" }) {
   );
 }
 
-function buildClaimPrintRecord(record) {
+function numberValue(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function claimDetailAmount(row = {}) {
+  const directAmount = Number(row.amount);
+  if (Number.isFinite(directAmount) && directAmount > 0) return directAmount;
+  return numberValue(row.quantity) * numberValue(row.unitPrice);
+}
+
+function claimDetailTotal(details = []) {
+  return details.reduce((total, row) => total + claimDetailAmount(row), 0);
+}
+
+function claimRetentionAmount(claim = {}) {
+  return numberValue(claim.retentionAmount);
+}
+
+function claimCleaningFee(claim = {}) {
+  return numberValue(claim.cleaningFee);
+}
+
+function claimInsuranceFee(claim = {}) {
+  return numberValue(claim.insuranceFee);
+}
+
+function claimOtherDeduction(claim = {}) {
+  return numberValue(claim.otherDeduction);
+}
+
+function claimDeductionTotal(claim = {}) {
+  return (
+    claimRetentionAmount(claim) +
+    claimCleaningFee(claim) +
+    claimInsuranceFee(claim) +
+    claimOtherDeduction(claim)
+  );
+}
+
+function claimGrossAmount(claim = {}) {
+  const detailsTotal = claimDetailTotal(claim.details || []);
+  return numberValue(claim.grossAmount ?? claim.claimAmount ?? (detailsTotal || claim.amount));
+}
+
+function claimNetAmount(claim = {}) {
+  if (claim.netAmount !== undefined && claim.netAmount !== null && claim.netAmount !== "") {
+    return numberValue(claim.netAmount);
+  }
+  if (
+    claim.grossAmount === undefined &&
+    claim.claimAmount === undefined &&
+    !claim.details?.length &&
+    claim.amount !== undefined
+  ) {
+    return numberValue(claim.amount);
+  }
+  return Math.max(claimGrossAmount(claim) - claimDeductionTotal(claim), 0);
+}
+
+function claimPaidAmount(claim = {}) {
+  return paidClaimStatuses.has(claim.status) ? claimNetAmount(claim) : 0;
+}
+
+function claimContractKey(claim = {}) {
+  return String(claim.contractId || `${claim.vendor || ""}::${claim.contract || ""}`);
+}
+
+function claimIsTemporary(claim = {}, contracts = []) {
+  if (claim.sourceType === "temporary") return true;
+  if (claim.contractId) return false;
+  return !contracts.some(
+    (contract) => contract.vendor === claim.vendor && contract.name === claim.contract,
+  );
+}
+
+function contractForClaim(claim = {}, contracts = []) {
+  if (claim.contractId) return contracts.find((contract) => contract.id === claim.contractId) || null;
+  return (
+    contracts.find((contract) => contract.vendor === claim.vendor && contract.name === claim.contract) || null
+  );
+}
+
+function claimContractAmount(claim = {}, contracts = []) {
+  const contract = contractForClaim(claim, contracts);
+  return numberValue(claim.contractAmount || contract?.amount);
+}
+
+function normalizedClaim(claim = {}, contracts = []) {
+  const grossAmount = claimGrossAmount(claim);
+  const netAmount = claimNetAmount(claim);
+  const contract = contractForClaim(claim, contracts);
+  const temporary = claimIsTemporary(claim, contracts);
+
   return {
-    title: `${record.vendor || "未填寫廠商"} ${record.period || ""}`.trim(),
-    subtitle: record.contract,
-    status: record.status,
+    ...claim,
+    sourceType: claim.sourceType || (temporary ? "temporary" : "contract"),
+    contractId: claim.contractId || contract?.id || "",
+    contractAmount: claimContractAmount(claim, contracts),
+    grossAmount,
+    retentionAmount: claimRetentionAmount(claim),
+    cleaningFee: claimCleaningFee(claim),
+    insuranceFee: claimInsuranceFee(claim),
+    otherDeduction: claimOtherDeduction(claim),
+    deductionTotal: claimDeductionTotal(claim),
+    netAmount,
+    paidAmount: claimPaidAmount(claim),
+    temporary,
+  };
+}
+
+function summarizeClaims(claims = [], contracts = []) {
+  const normalized = claims.map((claim) => normalizedClaim(claim, contracts));
+  const contractTotal = contracts.reduce((total, contract) => total + numberValue(contract.amount), 0);
+  const temporaryContractTotal = normalized
+    .filter((claim) => claim.temporary)
+    .reduce((total, claim) => total + Math.max(claim.contractAmount, claim.grossAmount), 0);
+  const totals = normalized.reduce(
+    (summary, claim) => {
+      summary.grossAmount += claim.grossAmount;
+      summary.approvedAmount += approvedClaimStatuses.has(claim.status) ? claim.netAmount : 0;
+      summary.paidAmount += claim.paidAmount;
+      summary.netAmount += claim.netAmount;
+      summary.retentionAmount += claim.retentionAmount;
+      summary.cleaningFee += claim.cleaningFee;
+      summary.insuranceFee += claim.insuranceFee;
+      summary.otherDeduction += claim.otherDeduction;
+      summary.deductionTotal += claim.deductionTotal;
+      return summary;
+    },
+    {
+      contractTotal: contractTotal + temporaryContractTotal,
+      formalContractTotal: contractTotal,
+      temporaryContractTotal,
+      grossAmount: 0,
+      approvedAmount: 0,
+      paidAmount: 0,
+      netAmount: 0,
+      retentionAmount: 0,
+      cleaningFee: 0,
+      insuranceFee: 0,
+      otherDeduction: 0,
+      deductionTotal: 0,
+    },
+  );
+  const vendorMap = new Map();
+
+  normalized.forEach((claim) => {
+    const vendor = claim.vendor || "未填寫廠商";
+    const current =
+      vendorMap.get(vendor) || {
+        vendor,
+        claims: [],
+        formalContractTotal: contracts
+          .filter((contract) => contract.vendor === vendor)
+          .reduce((total, contract) => total + numberValue(contract.amount), 0),
+        temporaryContractTotal: 0,
+        grossAmount: 0,
+        netAmount: 0,
+        paidAmount: 0,
+        retentionAmount: 0,
+        cleaningFee: 0,
+        insuranceFee: 0,
+        statuses: {},
+      };
+    current.claims.push(claim);
+    if (claim.temporary) current.temporaryContractTotal += Math.max(claim.contractAmount, claim.grossAmount);
+    current.grossAmount += claim.grossAmount;
+    current.netAmount += claim.netAmount;
+    current.paidAmount += claim.paidAmount;
+    current.retentionAmount += claim.retentionAmount;
+    current.cleaningFee += claim.cleaningFee;
+    current.insuranceFee += claim.insuranceFee;
+    current.statuses[claim.status || "未設定"] = (current.statuses[claim.status || "未設定"] || 0) + 1;
+    vendorMap.set(vendor, current);
+  });
+
+  const vendors = Array.from(vendorMap.values())
+    .map((vendor) => ({
+      ...vendor,
+      contractTotal: vendor.formalContractTotal + vendor.temporaryContractTotal,
+      unpaidAmount: Math.max(vendor.netAmount - vendor.paidAmount, 0),
+    }))
+    .sort((a, b) => b.grossAmount - a.grossAmount);
+
+  return {
+    totals: {
+      ...totals,
+      unpaidAmount: Math.max(totals.netAmount - totals.paidAmount, 0),
+      remainingContractAmount: Math.max(totals.contractTotal - totals.grossAmount, 0),
+    },
+    vendors,
+    normalized,
+  };
+}
+
+function buildClaimPrintRecord(record) {
+  const claim = normalizedClaim(record);
+  return {
+    title: `${claim.vendor || "未填寫廠商"} ${claim.period || ""}`.trim(),
+    subtitle: claim.temporary ? `臨時發包 / 無合約｜${claim.contract}` : claim.contract,
+    status: claim.status,
     fields: [
-      ["廠商名稱", record.vendor],
-      ["工程類別", record.trade],
-      ["合約名稱", record.contract],
-      ["期別", record.period],
-      ["請款月份", record.month],
-      ["本期金額", twd(record.amount)],
-      ["狀態", record.status],
+      ["請款模式", claim.temporary ? "臨時發包 / 無合約" : "合約請款"],
+      ["廠商名稱", claim.vendor],
+      ["工程類別", claim.trade],
+      ["合約 / 發包名稱", claim.contract],
+      ["合約總額", twd(claim.contractAmount)],
+      ["期別", claim.period],
+      ["請款月份", claim.month],
+      ["請款總額", twd(claim.grossAmount)],
+      ["保留款", twd(claim.retentionAmount)],
+      ["清潔費", twd(claim.cleaningFee)],
+      ["保險費", twd(claim.insuranceFee)],
+      ["其他扣款", twd(claim.otherDeduction)],
+      ["本期應付", twd(claim.netAmount)],
+      ["狀態", claim.status],
     ],
-    attachments: record.attachments,
+    tables: claim.details?.length
+      ? [
+          {
+            title: "請款明細",
+            rows: claim.details.map((row, index) => ({
+              index: index + 1,
+              item: row.item,
+              quantity: row.quantity,
+              unit: row.unit,
+              unitPrice: row.unitPrice ? twd(row.unitPrice) : "",
+              amount: twd(claimDetailAmount(row)),
+              note: row.note,
+            })),
+            columns: [
+              ["index", "序"],
+              ["item", "工項"],
+              ["quantity", "數量"],
+              ["unit", "單位"],
+              ["unitPrice", "單價"],
+              ["amount", "金額"],
+              ["note", "備註"],
+            ],
+          },
+        ]
+      : [],
+    note: claim.note,
+    attachments: claim.attachments,
   };
 }
 
@@ -3677,6 +3946,91 @@ function DailyResourceSummary({ reports = [] }) {
   );
 }
 
+function ClaimMetric({ title, value, desc }) {
+  return (
+    <div className="rounded-2xl border bg-slate-50 p-4">
+      <p className="text-sm text-slate-500">{title}</p>
+      <p className="mt-2 text-xl font-bold">{value}</p>
+      {desc ? <p className="mt-1 text-xs text-slate-500">{desc}</p> : null}
+    </div>
+  );
+}
+
+function createClaimDetail() {
+  return { id: Date.now() + Math.random(), item: "", quantity: "", unit: "", unitPrice: "", amount: "", note: "" };
+}
+
+function createClaimDraft(project, contracts = []) {
+  const firstContract = contracts[0];
+  return {
+    sourceType: firstContract ? "contract" : "temporary",
+    contractId: firstContract?.id || "",
+    period: "",
+    month: project.nextClaim || todayKey().slice(0, 7).replace("-", "/"),
+    trade: firstContract?.trade || "",
+    vendor: firstContract?.vendor || "",
+    contract: firstContract?.name || "",
+    contractAmount: firstContract?.amount || "",
+    grossAmount: "",
+    retentionAmount: "",
+    cleaningFee: "",
+    insuranceFee: "",
+    otherDeduction: "",
+    status: "待送審",
+    note: "",
+    details: [createClaimDetail()],
+    attachments: [],
+  };
+}
+
+function ClaimDetailRows({ rows, onChange, onAdd, onRemove }) {
+  const total = claimDetailTotal(rows);
+
+  return (
+    <div className="rounded-2xl border p-4 md:col-span-2">
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="font-bold">請款明細</h3>
+          <p className="mt-1 text-xs text-slate-500">可逐列填工項、數量、單價；若直接填金額，系統會以該金額為準。</p>
+        </div>
+        <Button type="button" variant="outline" onClick={onAdd}>
+          <Plus className="mr-2 h-4 w-4" />
+          新增明細列
+        </Button>
+      </div>
+      <div className="grid gap-3">
+        {rows.map((row, index) => (
+          <div key={row.id} className="rounded-2xl bg-slate-50 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <b>明細 {index + 1}</b>
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                disabled={rows.length === 1}
+                onClick={() => onRemove(row.id)}
+              >
+                刪除
+              </Button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+              <Input value={row.item} onChange={(value) => onChange(row.id, "item", value)} ph="工項 / 品名" />
+              <Input type="number" value={row.quantity} onChange={(value) => onChange(row.id, "quantity", value)} ph="數量" />
+              <Input value={row.unit} onChange={(value) => onChange(row.id, "unit", value)} ph="單位" />
+              <Input type="number" value={row.unitPrice} onChange={(value) => onChange(row.id, "unitPrice", value)} ph="單價" />
+              <Input type="number" value={row.amount} onChange={(value) => onChange(row.id, "amount", value)} ph="金額" />
+              <Input value={row.note} onChange={(value) => onChange(row.id, "note", value)} ph="備註" />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 rounded-xl bg-slate-900 px-4 py-3 text-right text-sm font-bold text-white">
+        明細合計：{twd(total)}
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ p, claims, memoItems, todoItems, contractItems, dailyReports }) {
   const m = p.nextClaim || "2026/05";
   const total = sum(claims, m);
@@ -3724,27 +4078,90 @@ function Dashboard({ p, claims, memoItems, todoItems, contractItems, dailyReport
   );
 }
 
-function Claims({ p, claims, onSave, onDelete }) {
+function Claims({ p, claims, contracts = [], onSave, onDelete }) {
   const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState({
-    period: "",
-    month: p.nextClaim || "2026/05",
-    trade: "",
-    vendor: "",
-    contract: "",
-    amount: "",
-    status: "待送審",
-    attachments: [],
+  const [draft, setDraft] = useState(() => createClaimDraft(p, contracts));
+  const [openClaimId, setOpenClaimId] = useState("");
+  const [sections, setSections] = useState({
+    summary: true,
+    vendors: true,
+    records: true,
   });
+  const claimSummary = useMemo(() => summarizeClaims(claims, contracts), [claims, contracts]);
+  const lineTotal = claimDetailTotal(draft.details);
+  const draftGrossAmount = lineTotal || numberValue(draft.grossAmount);
+  const draftDeductionTotal = claimDeductionTotal(draft);
+  const draftNetAmount = Math.max(draftGrossAmount - draftDeductionTotal, 0);
+  const selectedContract = contracts.find((contract) => contract.id === draft.contractId);
+
+  function setSection(key) {
+    setSections((current) => ({ ...current, [key]: !current[key] }));
+  }
+
+  function resetDraft() {
+    setDraft(createClaimDraft(p, contracts));
+  }
+
+  function applyContract(contractId) {
+    const contract = contracts.find((item) => item.id === contractId);
+    setDraft((current) => ({
+      ...current,
+      sourceType: "contract",
+      contractId,
+      vendor: contract?.vendor || current.vendor,
+      trade: contract?.trade || current.trade,
+      contract: contract?.name || current.contract,
+      contractAmount: contract?.amount || current.contractAmount,
+    }));
+  }
+
+  function updateDetail(id, key, value) {
+    setDraft((current) => ({
+      ...current,
+      details: current.details.map((row) => (row.id === id ? { ...row, [key]: value } : row)),
+    }));
+  }
+
+  function addDetail() {
+    setDraft((current) => ({ ...current, details: [...current.details, createClaimDetail()] }));
+  }
+
+  function removeDetail(id) {
+    setDraft((current) => ({
+      ...current,
+      details: current.details.length === 1 ? current.details : current.details.filter((row) => row.id !== id),
+    }));
+  }
 
   async function saveClaim() {
+    const details = draft.details
+      .filter((row) =>
+        [row.item, row.quantity, row.unit, row.unitPrice, row.amount, row.note].some((value) =>
+          String(value || "").trim(),
+        ),
+      )
+      .map(({ id, ...row }) => ({
+        ...row,
+        amount: claimDetailAmount(row),
+      }));
+    const grossAmount = claimDetailTotal(details) || numberValue(draft.grossAmount);
     const next = {
       ...draft,
       period: draft.period || `第 ${claims.length + 1} 期`,
+      sourceType: draft.sourceType,
+      contractId: draft.sourceType === "contract" ? draft.contractId : "",
       trade: draft.trade || "未分類工程",
       vendor: draft.vendor || "未填寫廠商",
-      contract: draft.contract || "未填寫合約",
-      amount: Number(draft.amount || 0),
+      contract: draft.contract || (draft.sourceType === "temporary" ? "臨時發包" : "未填寫合約"),
+      contractAmount: numberValue(draft.contractAmount),
+      grossAmount,
+      retentionAmount: numberValue(draft.retentionAmount),
+      cleaningFee: numberValue(draft.cleaningFee),
+      insuranceFee: numberValue(draft.insuranceFee),
+      otherDeduction: numberValue(draft.otherDeduction),
+      amount: Math.max(grossAmount - claimDeductionTotal(draft), 0),
+      netAmount: Math.max(grossAmount - claimDeductionTotal(draft), 0),
+      details,
       attachments: draft.attachments || [],
       projectId: p.id,
       projectName: p.name,
@@ -3754,16 +4171,7 @@ function Claims({ p, claims, onSave, onDelete }) {
       title: `${next.vendor} ${next.period}`,
       status: next.status,
     });
-    setDraft({
-      period: "",
-      month: p.nextClaim || "2026/05",
-      trade: "",
-      vendor: "",
-      contract: "",
-      amount: "",
-      status: "待送審",
-      attachments: [],
-    });
+    resetDraft();
     setAdding(false);
   }
 
@@ -3774,112 +4182,140 @@ function Claims({ p, claims, onSave, onDelete }) {
     buildPrintRecord: buildClaimPrintRecord,
   });
 
+  const normalizedFilteredClaims = exportControls.filteredRecords.map((claim) =>
+    normalizedClaim(claim, contracts),
+  );
+
   return (
-    <ListPage
-      title="廠商請款資料"
-      sub={`目前工地：${p.name}`}
-      onAdd={() => setAdding(true)}
-      items={exportControls.filteredRecords}
-      toolbar={<RecordExportToolbar controls={exportControls} placeholder="搜尋廠商、工種、合約、期別或狀態" />}
-      emptyText={claims.length ? "找不到符合條件的請款資料。" : "尚無廠商請款資料，請新增第一筆請款。"}
-      render={(x) => (
-        <Card key={`${x.vendor}-${x.period}-${x.month}`}>
-          <CardContent className="flex flex-col justify-between gap-4 p-5 sm:flex-row">
-            <div>
-              <div className="flex flex-wrap gap-2">
-                <h3 className="text-lg font-bold">{x.vendor}</h3>
-                <Badge>{x.status}</Badge>
-                <Badge>{x.trade}</Badge>
-              </div>
-              <p className="text-sm text-slate-500">{x.contract}</p>
-              <p className="flex gap-1 text-sm text-slate-500">
-                <CalendarDays className="h-4 w-4" />
-                {x.period}/{x.month}
-              </p>
-              <AttachmentSummary attachments={x.attachments} />
-            </div>
-            <div className="text-left sm:text-right">
-              <p className="text-sm text-slate-500">本期請款</p>
-              <p className="text-2xl font-bold">{twd(x.amount)}</p>
-              <div className="mt-2 flex flex-wrap gap-2 sm:justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => exportControls.exportRecords([x], { from: recordDateKey(x), to: recordDateKey(x) })}
-                >
-                  <FileDown className="mr-1 h-3.5 w-3.5" />
-                  列印本筆
-                </Button>
-                <Del label={`${x.vendor} ${x.period}`} onClick={() => onDelete(x.id)} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    >
+    <div>
+      <Header
+        title="廠商請款資料"
+        sub={`目前工地：${p.name}，彙整合約請款、臨時發包與各項扣款累計`}
+        btn="新增請款"
+        onAdd={() => {
+          resetDraft();
+          setAdding(true);
+          setOpenClaimId("");
+        }}
+      />
+
       {adding ? (
         <Card className="mb-4">
           <CardContent className="grid gap-4 p-5 md:grid-cols-2">
+            <div className="md:col-span-2 grid gap-2 rounded-2xl bg-slate-50 p-3 sm:grid-cols-2">
+              <Button
+                type="button"
+                variant={draft.sourceType === "contract" ? "primary" : "outline"}
+                onClick={() => applyContract(draft.contractId || contracts[0]?.id || "")}
+                disabled={!contracts.length}
+              >
+                合約請款
+              </Button>
+              <Button
+                type="button"
+                variant={draft.sourceType === "temporary" ? "primary" : "outline"}
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    sourceType: "temporary",
+                    contractId: "",
+                    contract: current.contract || "臨時發包",
+                  }))
+                }
+              >
+                無合約 / 臨時發包
+              </Button>
+            </div>
+
+            {draft.sourceType === "contract" ? (
+              <label className="md:col-span-2">
+                <span className="text-sm font-medium">連結工程合約</span>
+                <select
+                  value={draft.contractId}
+                  onChange={(event) => applyContract(event.target.value)}
+                  className="mt-2 w-full rounded-xl border bg-white px-3 py-2 outline-none"
+                >
+                  <option value="">請選擇合約</option>
+                  {contracts.map((contract) => (
+                    <option key={contract.id} value={contract.id}>
+                      {contract.vendor}｜{contract.name}｜{twd(contract.amount)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <div className="md:col-span-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                此模式適合未正式建合約的臨時叫工、追加發包或一次性支出；仍可填入預估發包總額以納入統計。
+              </div>
+            )}
+
             <label>
               <span className="text-sm font-medium">廠商名稱</span>
               <div className="mt-2">
-                <Input
-                  value={draft.vendor}
-                  onChange={(value) => setDraft({ ...draft, vendor: value })}
-                  ph="例如：宏鑫水電"
-                />
+                <Input value={draft.vendor} onChange={(value) => setDraft({ ...draft, vendor: value })} ph="例如：宏鑫水電" />
               </div>
             </label>
             <label>
               <span className="text-sm font-medium">工程類別</span>
               <div className="mt-2">
-                <Input
-                  value={draft.trade}
-                  onChange={(value) => setDraft({ ...draft, trade: value })}
-                  ph="例如：水電工程"
-                />
+                <Input value={draft.trade} onChange={(value) => setDraft({ ...draft, trade: value })} ph="例如：水電工程" />
               </div>
             </label>
             <label>
-              <span className="text-sm font-medium">合約名稱</span>
+              <span className="text-sm font-medium">{draft.sourceType === "temporary" ? "發包名稱" : "合約名稱"}</span>
               <div className="mt-2">
-                <Input
-                  value={draft.contract}
-                  onChange={(value) => setDraft({ ...draft, contract: value })}
-                  ph="例如：水電配管工程"
-                />
+                <Input value={draft.contract} onChange={(value) => setDraft({ ...draft, contract: value })} ph="例如：水電配管工程" />
+              </div>
+            </label>
+            <label>
+              <span className="text-sm font-medium">{draft.sourceType === "temporary" ? "預估發包總額" : "合約總額"}</span>
+              <div className="mt-2">
+                <Input type="number" value={draft.contractAmount} onChange={(value) => setDraft({ ...draft, contractAmount: value })} ph="例如：1200000" />
               </div>
             </label>
             <label>
               <span className="text-sm font-medium">期別</span>
               <div className="mt-2">
-                <Input
-                  value={draft.period}
-                  onChange={(value) => setDraft({ ...draft, period: value })}
-                  ph="例如：第 1 期"
-                />
+                <Input value={draft.period} onChange={(value) => setDraft({ ...draft, period: value })} ph="例如：第 1 期" />
               </div>
             </label>
             <label>
               <span className="text-sm font-medium">請款月份</span>
               <div className="mt-2">
-                <Input
-                  value={draft.month}
-                  onChange={(value) => setDraft({ ...draft, month: value })}
-                  ph="例如：2026/05"
-                />
+                <Input value={draft.month} onChange={(value) => setDraft({ ...draft, month: value })} ph="例如：2026/05" />
+              </div>
+            </label>
+
+            <ClaimDetailRows rows={draft.details} onChange={updateDetail} onAdd={addDetail} onRemove={removeDetail} />
+
+            <label>
+              <span className="text-sm font-medium">請款總額</span>
+              <div className="mt-2">
+                <Input type="number" value={draft.grossAmount} onChange={(value) => setDraft({ ...draft, grossAmount: value })} ph="明細未填金額時可手動輸入" />
               </div>
             </label>
             <label>
-              <span className="text-sm font-medium">本期金額</span>
+              <span className="text-sm font-medium">保留款</span>
               <div className="mt-2">
-                <Input
-                  type="number"
-                  value={draft.amount}
-                  onChange={(value) => setDraft({ ...draft, amount: value })}
-                  ph="例如：185000"
-                />
+                <Input type="number" value={draft.retentionAmount} onChange={(value) => setDraft({ ...draft, retentionAmount: value })} ph="例如：10000" />
+              </div>
+            </label>
+            <label>
+              <span className="text-sm font-medium">清潔費</span>
+              <div className="mt-2">
+                <Input type="number" value={draft.cleaningFee} onChange={(value) => setDraft({ ...draft, cleaningFee: value })} ph="例如：3000" />
+              </div>
+            </label>
+            <label>
+              <span className="text-sm font-medium">保險費</span>
+              <div className="mt-2">
+                <Input type="number" value={draft.insuranceFee} onChange={(value) => setDraft({ ...draft, insuranceFee: value })} ph="例如：2000" />
+              </div>
+            </label>
+            <label>
+              <span className="text-sm font-medium">其他扣款</span>
+              <div className="mt-2">
+                <Input type="number" value={draft.otherDeduction} onChange={(value) => setDraft({ ...draft, otherDeduction: value })} ph="例如：0" />
               </div>
             </label>
             <label>
@@ -3887,18 +4323,52 @@ function Claims({ p, claims, onSave, onDelete }) {
               <CustomSelect
                 value={draft.status}
                 onChange={(value) => setDraft({ ...draft, status: value })}
-                options={["待送審", "審核中", "待付款", "已付款"]}
+                options={claimStatusOptions}
                 className="mt-2 space-y-2"
                 otherPlaceholder="請輸入自訂狀態"
               />
             </label>
+            <label className="md:col-span-2">
+              <span className="text-sm font-medium">請款備註</span>
+              <textarea
+                value={draft.note}
+                onChange={(event) => setDraft({ ...draft, note: event.target.value })}
+                className="mt-2 min-h-24 w-full rounded-xl border px-3 py-2 outline-none"
+                placeholder="可記錄估驗依據、退回原因、付款條件或臨時發包原因"
+              />
+            </label>
+            <div className="md:col-span-2 grid gap-3 rounded-2xl bg-slate-900 p-4 text-white sm:grid-cols-4">
+              <div>
+                <p className="text-xs text-slate-300">請款總額</p>
+                <p className="mt-1 font-bold">{twd(draftGrossAmount)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-300">扣款合計</p>
+                <p className="mt-1 font-bold">{twd(draftDeductionTotal)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-300">本期應付</p>
+                <p className="mt-1 font-bold">{twd(draftNetAmount)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-300">合約來源</p>
+                <p className="mt-1 font-bold">{selectedContract ? "已連結" : "手動/臨時"}</p>
+              </div>
+            </div>
             <ImageAttachments
               className="md:col-span-2"
               value={draft.attachments}
               onChange={(attachments) => setDraft({ ...draft, attachments })}
             />
             <ActionBar className="md:col-span-2">
-              <Button type="button" variant="outline" onClick={() => setAdding(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  resetDraft();
+                  setAdding(false);
+                }}
+              >
                 取消
               </Button>
               <Button type="button" onClick={saveClaim}>
@@ -3909,7 +4379,172 @@ function Claims({ p, claims, onSave, onDelete }) {
           </CardContent>
         </Card>
       ) : null}
-    </ListPage>
+
+      <div className="grid gap-4">
+        <AccordionSection
+          title="請款總覽"
+          desc="整體合約、請款、付款與扣款累計"
+          meta={twd(claimSummary.totals.grossAmount)}
+          open={sections.summary}
+          onToggle={() => setSection("summary")}
+        >
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <ClaimMetric title="合約總額" value={twd(claimSummary.totals.contractTotal)} desc="工程合約 + 臨時發包估算" />
+            <ClaimMetric title="請款總額" value={twd(claimSummary.totals.grossAmount)} desc="所有期別原始請款合計" />
+            <ClaimMetric title="已請款總額" value={twd(claimSummary.totals.paidAmount)} desc="已付款 / 已結案金額" />
+            <ClaimMetric title="本期應付累計" value={twd(claimSummary.totals.netAmount)} desc="請款扣除保留款與費用後" />
+            <ClaimMetric title="保留款總額" value={twd(claimSummary.totals.retentionAmount)} />
+            <ClaimMetric title="清潔費總額" value={twd(claimSummary.totals.cleaningFee)} />
+            <ClaimMetric title="保險費總額" value={twd(claimSummary.totals.insuranceFee)} />
+            <ClaimMetric title="未付應付額" value={twd(claimSummary.totals.unpaidAmount)} desc="本期應付扣除已付款" />
+          </div>
+        </AccordionSection>
+
+        <AccordionSection
+          title="各廠商請款狀況"
+          desc="依廠商彙整合約、臨時發包、請款與未付金額"
+          meta={`${claimSummary.vendors.length} 家`}
+          open={sections.vendors}
+          onToggle={() => setSection("vendors")}
+        >
+          {claimSummary.vendors.length ? (
+            <div className="grid gap-3 lg:grid-cols-2">
+              {claimSummary.vendors.map((vendor) => (
+                <div key={vendor.vendor} className="rounded-2xl border bg-slate-50 p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h3 className="font-bold">{vendor.vendor}</h3>
+                      <p className="mt-1 text-sm text-slate-500">
+                        合約 {twd(vendor.formalContractTotal)}｜臨時 {twd(vendor.temporaryContractTotal)}
+                      </p>
+                    </div>
+                    <Badge>{vendor.claims.length} 筆請款</Badge>
+                  </div>
+                  <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                    <ClaimMetric title="請款" value={twd(vendor.grossAmount)} />
+                    <ClaimMetric title="已付" value={twd(vendor.paidAmount)} />
+                    <ClaimMetric title="未付" value={twd(vendor.unpaidAmount)} />
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {Object.entries(vendor.statuses).map(([status, count]) => (
+                      <Badge key={status}>{status} {count}</Badge>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">尚無廠商請款資料。</p>
+          )}
+        </AccordionSection>
+
+        <AccordionSection
+          title="請款紀錄"
+          desc="可檢索、匯出 PDF、展開查看扣款與明細"
+          meta={`${normalizedFilteredClaims.length} 筆`}
+          open={sections.records}
+          onToggle={() => setSection("records")}
+        >
+          <RecordExportToolbar controls={exportControls} placeholder="搜尋廠商、工種、合約、期別、狀態或扣款內容" />
+          {normalizedFilteredClaims.length ? (
+            <div className="grid gap-3">
+              {normalizedFilteredClaims.map((claim) => {
+                const isOpen = openClaimId === claim.id;
+                return (
+                  <Card key={claim.id || `${claim.vendor}-${claim.period}-${claim.month}`}>
+                    <CardContent className="p-5">
+                      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+                        <button
+                          type="button"
+                          onClick={() => setOpenClaimId(isOpen ? "" : claim.id)}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-lg font-bold">{claim.vendor}</h3>
+                            <Badge>{claim.status}</Badge>
+                            <Badge>{claim.temporary ? "臨時發包" : "合約請款"}</Badge>
+                            <Badge>{claim.trade}</Badge>
+                          </div>
+                          <p className="mt-2 text-sm text-slate-500">
+                            {claim.contract}｜{claim.period}/{claim.month}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-500">
+                            請款 {twd(claim.grossAmount)}｜扣款 {twd(claim.deductionTotal)}｜應付 {twd(claim.netAmount)}
+                          </p>
+                          <AttachmentSummary attachments={claim.attachments} />
+                        </button>
+                        <div className="grid gap-2 text-left sm:grid-cols-3 lg:w-[420px]">
+                          <ClaimMetric title="請款總額" value={twd(claim.grossAmount)} />
+                          <ClaimMetric title="保留款" value={twd(claim.retentionAmount)} />
+                          <ClaimMetric title="本期應付" value={twd(claim.netAmount)} />
+                        </div>
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2 sm:justify-end">
+                        <Button type="button" variant="outline" onClick={() => setOpenClaimId(isOpen ? "" : claim.id)}>
+                          {isOpen ? "收合" : "查看明細"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => exportControls.exportRecords([claim], { from: recordDateKey(claim), to: recordDateKey(claim) })}
+                        >
+                          <FileDown className="mr-2 h-4 w-4" />
+                          列印本筆
+                        </Button>
+                        <Del label={`${claim.vendor} ${claim.period}`} onClick={() => onDelete(claim.id)} />
+                      </div>
+                      {isOpen ? (
+                        <div className="mt-4 grid gap-4 border-t pt-4">
+                          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                            <ClaimMetric title="合約 / 發包總額" value={twd(claim.contractAmount)} />
+                            <ClaimMetric title="清潔費" value={twd(claim.cleaningFee)} />
+                            <ClaimMetric title="保險費" value={twd(claim.insuranceFee)} />
+                            <ClaimMetric title="其他扣款" value={twd(claim.otherDeduction)} />
+                          </div>
+                          <DailyReportTable
+                            title="請款明細"
+                            rows={(claim.details || []).map((row, index) => ({
+                              index: index + 1,
+                              item: row.item,
+                              quantity: row.quantity,
+                              unit: row.unit,
+                              unitPrice: row.unitPrice ? twd(row.unitPrice) : "",
+                              amount: twd(claimDetailAmount(row)),
+                              note: row.note,
+                            }))}
+                            columns={[
+                              ["index", "序"],
+                              ["item", "工項"],
+                              ["quantity", "數量"],
+                              ["unit", "單位"],
+                              ["unitPrice", "單價"],
+                              ["amount", "金額"],
+                              ["note", "備註"],
+                            ]}
+                          />
+                          {claim.note ? (
+                            <div className="rounded-2xl border p-4">
+                              <h4 className="font-bold">請款備註</h4>
+                              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{claim.note}</p>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          ) : (
+            <Card>
+              <CardContent className="p-8 text-center text-slate-500">
+                {claims.length ? "找不到符合條件的請款資料。" : "尚無廠商請款資料，請新增第一筆請款。"}
+              </CardContent>
+            </Card>
+          )}
+        </AccordionSection>
+      </div>
+    </div>
   );
 }
 
@@ -6656,6 +7291,15 @@ function Manual() {
   const versionNotes = [
     {
       version: APP_VERSION,
+      title: "請款工作台重整",
+      items: [
+        "廠商請款新增合約請款與無合約 / 臨時發包兩種模式，可依現場實際發包方式建檔。",
+        "請款表單新增明細列、合約總額、請款總額、保留款、清潔費、保險費、其他扣款與本期應付計算。",
+        "請款頁重整為總覽、各廠商請款狀況、請款紀錄三段收合式版面，方便快速查找與彙整。",
+      ],
+    },
+    {
+      version: "eztodo_26052605",
       title: "全表單 A4 匯出整合",
       items: [
         "廠商請款、工程合約、工項 Memo、檢核表、會議紀錄、缺失改善、待辦事項與通用表單新增檢索列匯出 PDF。",
@@ -8029,6 +8673,7 @@ export default function App() {
         <Claims
           p={p}
           claims={projectClaims}
+          contracts={projectContracts}
           onSave={(item, options) => claimRecords.saveItem(item, options)}
           onDelete={claimRecords.deleteItem}
         />
