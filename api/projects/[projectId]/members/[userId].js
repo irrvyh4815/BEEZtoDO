@@ -60,6 +60,8 @@ export default {
         role: normalizeRole(body.role),
         canView: true,
         canEdit: body.role === "viewer" ? Boolean(body.canEdit) : true,
+        canViewClaims: body.canViewClaims !== false,
+        canViewContracts: body.canViewContracts !== false,
         jobTitle: normalizeJobTitle(body.jobTitle),
       });
 

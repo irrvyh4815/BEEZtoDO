@@ -78,6 +78,8 @@ export function mapProject(row) {
     memberRole,
     canView: row.user_role === "admin" ? true : Boolean(row.member_can_view),
     canEdit: row.user_role === "admin" ? true : Boolean(row.member_can_edit),
+    canViewClaims: row.user_role === "admin" ? true : row.member_can_view_claims !== false,
+    canViewContracts: row.user_role === "admin" ? true : row.member_can_view_contracts !== false,
     canManage: row.user_role === "admin" || ["owner", "manager"].includes(memberRole),
     memberCount: Number(row.member_count || 0),
     createdAt: row.created_at,
@@ -96,6 +98,8 @@ export function mapProjectMember(row) {
     canEdit: ["owner", "manager", "editor"].includes(role)
       ? true
       : Boolean(row.can_edit),
+    canViewClaims: role === "owner" ? true : row.can_view_claims !== false,
+    canViewContracts: role === "owner" ? true : row.can_view_contracts !== false,
     createdAt: row.created_at,
   };
 }
@@ -299,9 +303,9 @@ async function backfillProjectOwnership() {
 
   await query(
     `insert into project_members (
-       project_id, user_id, member_role, can_view, can_edit, job_title, created_by
+       project_id, user_id, member_role, can_view, can_edit, can_view_claims, can_view_contracts, job_title, created_by
      )
-     select id, owner_id, 'owner', true, true, '工地建立者', owner_id
+     select id, owner_id, 'owner', true, true, true, true, '工地建立者', owner_id
      from projects
      where owner_id is not null
      on conflict (project_id, user_id) do nothing`,
@@ -381,6 +385,8 @@ async function initializeSchema() {
       member_role text not null default 'viewer',
       can_view boolean not null default true,
       can_edit boolean not null default false,
+      can_view_claims boolean not null default true,
+      can_view_contracts boolean not null default true,
       job_title text not null default '',
       created_by text references users(id) on delete set null,
       created_at timestamptz not null default now(),
@@ -393,6 +399,8 @@ async function initializeSchema() {
     on project_members (user_id, project_id)
   `);
   await query("alter table project_members add column if not exists job_title text not null default ''");
+  await query("alter table project_members add column if not exists can_view_claims boolean not null default true");
+  await query("alter table project_members add column if not exists can_view_contracts boolean not null default true");
   await query(
     `update project_members
      set job_title = case
@@ -618,6 +626,8 @@ export async function listProjects(user) {
             pm.member_role,
             pm.can_view as member_can_view,
             pm.can_edit as member_can_edit,
+            pm.can_view_claims as member_can_view_claims,
+            pm.can_view_contracts as member_can_view_contracts,
             $2::text as user_role,
             count(all_members.user_id)::int as member_count
      from projects p
@@ -625,7 +635,7 @@ export async function listProjects(user) {
      left join project_members pm on pm.project_id = p.id and pm.user_id = $1
      left join project_members all_members on all_members.project_id = p.id
      where $2 = 'admin' or pm.user_id is not null
-     group by p.id, owner_user.name, owner_user.email, pm.member_role, pm.can_view, pm.can_edit
+     group by p.id, owner_user.name, owner_user.email, pm.member_role, pm.can_view, pm.can_edit, pm.can_view_claims, pm.can_view_contracts
      order by p.created_at asc`,
     [user?.id || "", isAdmin ? "admin" : "member"],
   );
@@ -661,13 +671,15 @@ export async function insertProject(project, userId) {
   if (userId) {
     await query(
       `insert into project_members (
-         project_id, user_id, member_role, can_view, can_edit, job_title, created_by
+         project_id, user_id, member_role, can_view, can_edit, can_view_claims, can_view_contracts, job_title, created_by
        )
-       values ($1, $2, 'owner', true, true, '工地建立者', $2)
+       values ($1, $2, 'owner', true, true, true, true, '工地建立者', $2)
        on conflict (project_id, user_id) do update
        set member_role = 'owner',
            can_view = true,
            can_edit = true,
+           can_view_claims = true,
+           can_view_contracts = true,
            job_title = '工地建立者'`,
       [projectId, userId],
     );
@@ -729,6 +741,15 @@ export async function insertProjectRecord(projectId, record, userId) {
   return mapRecord(result.rows[0]);
 }
 
+export async function getProjectRecord(projectId, recordId) {
+  const result = await query(
+    "select * from project_records where project_id = $1 and id = $2",
+    [projectId, recordId],
+  );
+
+  return result.rows[0] ? mapRecord(result.rows[0]) : null;
+}
+
 export async function updateProjectRecord(projectId, recordId, record) {
   const payload = record.payload || {};
   const attachments = record.attachments || [];
@@ -768,7 +789,9 @@ export async function getProjectAccess(projectId, userId) {
             p.owner_id,
             pm.member_role,
             pm.can_view,
-            pm.can_edit
+            pm.can_edit,
+            pm.can_view_claims,
+            pm.can_view_contracts
      from projects p
      left join project_members pm on pm.project_id = p.id and pm.user_id = $2
      where p.id = $1`,
@@ -784,6 +807,8 @@ export async function listProjectMembers(projectId) {
             pm.member_role,
             pm.can_view,
             pm.can_edit,
+            pm.can_view_claims,
+            pm.can_view_contracts,
             pm.job_title,
             pm.created_at,
             u.name,
@@ -812,9 +837,9 @@ export async function upsertProjectMember(projectId, userId, options = {}) {
 
   const result = await query(
     `insert into project_members (
-       project_id, user_id, member_role, can_view, can_edit, job_title, created_by
+       project_id, user_id, member_role, can_view, can_edit, can_view_claims, can_view_contracts, job_title, created_by
      )
-     values ($1, $2, $3, $4, $5, $6, $7)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      on conflict (project_id, user_id) do update
      set member_role = case
            when project_members.member_role = 'owner' then 'owner'
@@ -828,6 +853,14 @@ export async function upsertProjectMember(projectId, userId, options = {}) {
            when project_members.member_role = 'owner' then true
            else excluded.can_edit
          end,
+         can_view_claims = case
+           when project_members.member_role = 'owner' then true
+           else excluded.can_view_claims
+         end,
+         can_view_contracts = case
+           when project_members.member_role = 'owner' then true
+           else excluded.can_view_contracts
+         end,
          job_title = case
            when project_members.member_role = 'owner' then project_members.job_title
            else excluded.job_title
@@ -839,6 +872,8 @@ export async function upsertProjectMember(projectId, userId, options = {}) {
       permissions.role,
       permissions.canView,
       permissions.canEdit,
+      options.canViewClaims !== false,
+      options.canViewContracts !== false,
       options.jobTitle || options.job_title || "現場工程師",
       options.createdBy || null,
     ],

@@ -36,7 +36,16 @@ export async function requireProjectAccess(request, projectId, permission = "vie
   }
 
   if (user.role === "admin") {
-    return { user, access: { member_role: "admin", can_view: true, can_edit: true } };
+    return {
+      user,
+      access: {
+        member_role: "admin",
+        can_view: true,
+        can_edit: true,
+        can_view_claims: true,
+        can_view_contracts: true,
+      },
+    };
   }
 
   if (!access.member_role || !access.can_view) {
@@ -52,4 +61,19 @@ export async function requireProjectAccess(request, projectId, permission = "vie
   }
 
   return { user, access };
+}
+
+export async function requireProjectModuleAccess(request, projectId, module, permission = "view") {
+  const result = await requireProjectAccess(request, projectId, permission);
+  const { access } = result;
+
+  if (module === "claims" && access.can_view_claims === false) {
+    throw new ApiError(403, "此帳號沒有請款相關文件閱覽權限", "PROJECT_CLAIMS_VIEW_REQUIRED");
+  }
+
+  if (module === "contracts" && access.can_view_contracts === false) {
+    throw new ApiError(403, "此帳號沒有合約相關文件閱覽權限", "PROJECT_CONTRACTS_VIEW_REQUIRED");
+  }
+
+  return result;
 }

@@ -10,7 +10,7 @@ import {
   methodNotAllowed,
   readJson,
 } from "../../../_lib/http.js";
-import { requireProjectAccess } from "../../../_lib/permissions.js";
+import { requireProjectAccess, requireProjectModuleAccess } from "../../../_lib/permissions.js";
 
 function projectIdFromUrl(url) {
   const parts = new URL(url).pathname.split("/").filter(Boolean);
@@ -40,6 +40,7 @@ export default {
 
       if (request.method === "GET") {
         const module = new URL(request.url).searchParams.get("module");
+        await requireProjectModuleAccess(request, projectId, module, "view");
         return json({ records: await listProjectRecords(projectId, module) });
       }
 
@@ -50,6 +51,7 @@ export default {
       if (!body.title?.trim()) {
         throw new ApiError(400, "缺少資料標題", "RECORD_TITLE_REQUIRED");
       }
+      await requireProjectModuleAccess(request, projectId, body.module, "edit");
 
       return json(
         {

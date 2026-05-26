@@ -17,6 +17,7 @@ import {
   MapPin,
   Megaphone,
   Package,
+  Pencil,
   Plus,
   RefreshCw,
   Save,
@@ -110,7 +111,7 @@ const mods = [
   ["photos", "照片中心"],
 ].map(([id, label]) => ({ id, label, icon: I[id] }));
 
-const APP_VERSION = "eztodo_26052606";
+const APP_VERSION = "eztodo_26052607";
 const SAMPLE_PROJECT_NAME = "範例工地：東區住宅新建工程";
 const DAILY_AI_SOURCE_MAX_BYTES = 3 * 1024 * 1024;
 
@@ -129,6 +130,12 @@ const projectJobTitleOptions = [
   "副組長",
   "工務",
   "監工",
+  "財務",
+  "會計",
+  "行政",
+  "採購",
+  "估算",
+  "內業工程師",
   "業主代表",
   "協力廠商窗口",
 ];
@@ -734,6 +741,21 @@ function seedItemsForProject(seedItems = [], project) {
     }));
 }
 
+function projectModuleRestriction(project, module) {
+  if (!project) return "";
+  if (module === "claims" && project.canViewClaims === false) {
+    return "此帳號沒有請款相關文件閱覽權限";
+  }
+  if (module === "contracts" && project.canViewContracts === false) {
+    return "此帳號沒有合約相關文件閱覽權限";
+  }
+  return "";
+}
+
+function canUseProjectModule(project, moduleId) {
+  return !projectModuleRestriction(project, moduleId);
+}
+
 function useProjectRecords(project, module, seedItems = []) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -744,6 +766,16 @@ function useProjectRecords(project, module, seedItems = []) {
 
     if (!project?.id && !project?.name) {
       setItems([]);
+      return () => {
+        active = false;
+      };
+    }
+
+    const restrictedMessage = projectModuleRestriction(project, module);
+    if (restrictedMessage) {
+      setItems([]);
+      setError(restrictedMessage);
+      setLoading(false);
       return () => {
         active = false;
       };
@@ -785,7 +817,7 @@ function useProjectRecords(project, module, seedItems = []) {
     return () => {
       active = false;
     };
-  }, [project?.id, project?.name, module]);
+  }, [project?.id, project?.name, project?.canViewClaims, project?.canViewContracts, module]);
 
   function writeLocal(nextItems) {
     if (!useLocalPreview || (!project?.id && !project?.name)) return;
@@ -793,6 +825,12 @@ function useProjectRecords(project, module, seedItems = []) {
   }
 
   async function saveItem(item, options = {}) {
+    const restrictedMessage = projectModuleRestriction(project, module);
+    if (restrictedMessage) {
+      setError(restrictedMessage);
+      throw new Error(restrictedMessage);
+    }
+
     const attachments = serializeAttachments(item.attachments);
     const nextLocal = {
       ...item,
@@ -835,6 +873,12 @@ function useProjectRecords(project, module, seedItems = []) {
   }
 
   async function deleteItem(id) {
+    const restrictedMessage = projectModuleRestriction(project, module);
+    if (restrictedMessage) {
+      setError(restrictedMessage);
+      throw new Error(restrictedMessage);
+    }
+
     const previous = items;
     const nextItems = items.filter((item) => item.id !== id && item.recordId !== id);
     setItems(nextItems);
@@ -854,6 +898,12 @@ function useProjectRecords(project, module, seedItems = []) {
   }
 
   async function updateItem(id, nextItem, options = {}) {
+    const restrictedMessage = projectModuleRestriction(project, module);
+    if (restrictedMessage) {
+      setError(restrictedMessage);
+      throw new Error(restrictedMessage);
+    }
+
     const normalized = {
       ...nextItem,
       id,
@@ -939,6 +989,22 @@ function Del({ label, onClick, icon = false, className = "" }) {
     >
       <Trash2 className={icon ? "h-3.5 w-3.5" : "mr-1 h-3.5 w-3.5"} />
       {icon ? null : "刪除"}
+    </Button>
+  );
+}
+
+function EditButton({ label, onClick, icon = false, className = "" }) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size={icon ? "icon" : "sm"}
+      onClick={onClick}
+      className={className}
+      aria-label={`編輯 ${label}`}
+    >
+      <Pencil className={icon ? "h-3.5 w-3.5" : "mr-1 h-3.5 w-3.5"} />
+      {icon ? null : "編輯"}
     </Button>
   );
 }
@@ -3609,6 +3675,8 @@ function ProjectMembers({ project }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("manager");
   const [jobTitle, setJobTitle] = useState("工地主任");
+  const [canViewClaims, setCanViewClaims] = useState(true);
+  const [canViewContracts, setCanViewContracts] = useState(true);
   const [loading, setLoading] = useState(!useLocalPreview);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -3625,6 +3693,8 @@ function ProjectMembers({ project }) {
           jobTitle: "工地建立者",
           canView: true,
           canEdit: true,
+          canViewClaims: true,
+          canViewContracts: true,
         },
       ]);
       setLoading(false);
@@ -3669,6 +3739,8 @@ function ProjectMembers({ project }) {
           jobTitle,
           canView: true,
           canEdit: role !== "viewer",
+          canViewClaims,
+          canViewContracts,
         },
       ]);
       setEmail("");
@@ -3679,7 +3751,7 @@ function ProjectMembers({ project }) {
     try {
       const data = await apiFetch(`/api/projects/${encodeURIComponent(project.id)}/members`, {
         method: "POST",
-        body: JSON.stringify({ email: cleanEmail, role, jobTitle }),
+        body: JSON.stringify({ email: cleanEmail, role, jobTitle, canViewClaims, canViewContracts }),
       });
       setMembers(data.members || []);
       setEmail("");
@@ -3690,14 +3762,31 @@ function ProjectMembers({ project }) {
     }
   }
 
-  async function updateMember(member, nextRole, nextJobTitle = member.jobTitle || "現場工程師") {
+  async function updateMember(
+    member,
+    nextRole,
+    nextJobTitle = member.jobTitle || "現場工程師",
+    nextPermissions = {},
+  ) {
     if (member.role === "owner") return;
 
     setError("");
     const previous = members;
+    const nextCanViewClaims =
+      nextPermissions.canViewClaims ?? member.canViewClaims ?? true;
+    const nextCanViewContracts =
+      nextPermissions.canViewContracts ?? member.canViewContracts ?? true;
     const nextMembers = members.map((item) =>
       item.userId === member.userId
-        ? { ...item, role: nextRole, jobTitle: nextJobTitle, canView: true, canEdit: nextRole !== "viewer" }
+        ? {
+            ...item,
+            role: nextRole,
+            jobTitle: nextJobTitle,
+            canView: true,
+            canEdit: nextRole !== "viewer",
+            canViewClaims: nextCanViewClaims,
+            canViewContracts: nextCanViewContracts,
+          }
         : item,
     );
     setMembers(nextMembers);
@@ -3709,7 +3798,12 @@ function ProjectMembers({ project }) {
         `/api/projects/${encodeURIComponent(project.id)}/members/${encodeURIComponent(member.userId)}`,
         {
           method: "PATCH",
-          body: JSON.stringify({ role: nextRole, jobTitle: nextJobTitle }),
+          body: JSON.stringify({
+            role: nextRole,
+            jobTitle: nextJobTitle,
+            canViewClaims: nextCanViewClaims,
+            canViewContracts: nextCanViewContracts,
+          }),
         },
       );
       setMembers(data.members || nextMembers);
@@ -3764,7 +3858,7 @@ function ProjectMembers({ project }) {
         ) : null}
 
         {canManage ? (
-          <div className="mb-4 grid gap-3 rounded-2xl bg-slate-50 p-4 lg:grid-cols-[1fr_180px_180px_auto]">
+          <div className="mb-4 grid gap-3 rounded-2xl bg-slate-50 p-4 lg:grid-cols-[minmax(220px,1fr)_170px_170px] xl:grid-cols-[minmax(220px,1fr)_170px_170px_auto_auto_auto]">
             <Input value={email} onChange={setEmail} ph="輸入已註冊帳號 Email" />
             <select
               value={role}
@@ -3788,6 +3882,22 @@ function ProjectMembers({ project }) {
                 </option>
               ))}
             </select>
+            <label className="flex min-h-11 items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={canViewClaims}
+                onChange={(event) => setCanViewClaims(event.target.checked)}
+              />
+              可閱覽請款
+            </label>
+            <label className="flex min-h-11 items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={canViewContracts}
+                onChange={(event) => setCanViewContracts(event.target.checked)}
+              />
+              可閱覽合約
+            </label>
             <Button type="button" disabled={busy === "add"} onClick={addMember}>
               {busy === "add" ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -3813,6 +3923,8 @@ function ProjectMembers({ project }) {
                       <h3 className="break-words font-bold">{member.name || member.email}</h3>
                       <Badge>{projectMemberRoleLabel(member.role)}</Badge>
                       {member.jobTitle ? <Badge>{member.jobTitle}</Badge> : null}
+                      {member.canViewClaims === false ? <Badge>請款受限</Badge> : <Badge>可閱覽請款</Badge>}
+                      {member.canViewContracts === false ? <Badge>合約受限</Badge> : <Badge>可閱覽合約</Badge>}
                     </div>
                     <p className="mt-1 break-words text-sm text-slate-500">{member.email}</p>
                     <p className="mt-2 text-xs text-slate-500">
@@ -3856,6 +3968,30 @@ function ProjectMembers({ project }) {
                         </option>
                       ))}
                     </select>
+                    <label className="flex min-h-10 items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={member.canViewClaims !== false}
+                        onChange={(event) =>
+                          updateMember(member, member.role, member.jobTitle, {
+                            canViewClaims: event.target.checked,
+                          })
+                        }
+                      />
+                      可閱覽請款
+                    </label>
+                    <label className="flex min-h-10 items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={member.canViewContracts !== false}
+                        onChange={(event) =>
+                          updateMember(member, member.role, member.jobTitle, {
+                            canViewContracts: event.target.checked,
+                          })
+                        }
+                      />
+                      可閱覽合約
+                    </label>
                   </div>
                 ) : null}
               </div>
@@ -4078,9 +4214,10 @@ function Dashboard({ p, claims, memoItems, todoItems, contractItems, dailyReport
   );
 }
 
-function Claims({ p, claims, contracts = [], onSave, onDelete }) {
+function Claims({ p, claims, contracts = [], onSave, onUpdate, onDelete }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState(() => createClaimDraft(p, contracts));
+  const [editingId, setEditingId] = useState("");
   const [openClaimId, setOpenClaimId] = useState("");
   const [sections, setSections] = useState({
     summary: true,
@@ -4100,6 +4237,35 @@ function Claims({ p, claims, contracts = [], onSave, onDelete }) {
 
   function resetDraft() {
     setDraft(createClaimDraft(p, contracts));
+    setEditingId("");
+  }
+
+  function startEditClaim(claim) {
+    const normalized = normalizedClaim(claim, contracts);
+    const sourceDetails = claim.details?.length ? claim.details : normalized.details || [];
+    setDraft({
+      ...createClaimDraft(p, contracts),
+      ...claim,
+      ...normalized,
+      sourceType: normalized.temporary ? "temporary" : "contract",
+      contractId: normalized.temporary ? "" : normalized.contractId || claim.contractId || "",
+      grossAmount: normalized.grossAmount || claim.grossAmount || claim.amount || "",
+      contractAmount: normalized.contractAmount || claim.contractAmount || "",
+      retentionAmount: normalized.retentionAmount || claim.retentionAmount || "",
+      cleaningFee: normalized.cleaningFee || claim.cleaningFee || "",
+      insuranceFee: normalized.insuranceFee || claim.insuranceFee || "",
+      otherDeduction: normalized.otherDeduction || claim.otherDeduction || "",
+      details: sourceDetails.length
+        ? sourceDetails.map((row, index) => ({
+            id: row.id || `${claim.id || Date.now()}-${index}`,
+            ...row,
+          }))
+        : [createClaimDetail()],
+      attachments: claim.attachments || [],
+    });
+    setEditingId(claim.id);
+    setAdding(true);
+    setOpenClaimId("");
   }
 
   function applyContract(contractId) {
@@ -4147,6 +4313,7 @@ function Claims({ p, claims, contracts = [], onSave, onDelete }) {
     const grossAmount = claimDetailTotal(details) || numberValue(draft.grossAmount);
     const next = {
       ...draft,
+      id: editingId || Date.now(),
       period: draft.period || `第 ${claims.length + 1} 期`,
       sourceType: draft.sourceType,
       contractId: draft.sourceType === "contract" ? draft.contractId : "",
@@ -4167,10 +4334,17 @@ function Claims({ p, claims, contracts = [], onSave, onDelete }) {
       projectName: p.name,
     };
 
-    await onSave(next, {
-      title: `${next.vendor} ${next.period}`,
-      status: next.status,
-    });
+    if (editingId && onUpdate) {
+      await onUpdate(editingId, next, {
+        title: `${next.vendor} ${next.period}`,
+        status: next.status,
+      });
+    } else {
+      await onSave(next, {
+        title: `${next.vendor} ${next.period}`,
+        status: next.status,
+      });
+    }
     resetDraft();
     setAdding(false);
   }
@@ -4373,7 +4547,7 @@ function Claims({ p, claims, contracts = [], onSave, onDelete }) {
               </Button>
               <Button type="button" onClick={saveClaim}>
                 <Save className="mr-2 h-4 w-4" />
-                儲存請款
+                {editingId ? "更新請款" : "儲存請款"}
               </Button>
             </ActionBar>
           </CardContent>
@@ -4491,6 +4665,7 @@ function Claims({ p, claims, contracts = [], onSave, onDelete }) {
                           <FileDown className="mr-2 h-4 w-4" />
                           列印本筆
                         </Button>
+                        <EditButton label={`${claim.vendor} ${claim.period}`} onClick={() => startEditClaim(claim)} />
                         <Del label={`${claim.vendor} ${claim.period}`} onClick={() => onDelete(claim.id)} />
                       </div>
                       {isOpen ? (
@@ -4548,9 +4723,9 @@ function Claims({ p, claims, contracts = [], onSave, onDelete }) {
   );
 }
 
-function Contracts({ p, items, onSave, onDelete }) {
+function Contracts({ p, items, onSave, onUpdate, onDelete }) {
   const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState({
+  const emptyDraft = {
     name: "",
     vendor: "",
     trade: "",
@@ -4562,27 +4737,29 @@ function Contracts({ p, items, onSave, onDelete }) {
     address: "",
     note: "",
     attachments: [],
-  });
+  };
+  const [draft, setDraft] = useState(emptyDraft);
+  const [editingId, setEditingId] = useState("");
 
   function resetDraft() {
+    setDraft(emptyDraft);
+    setEditingId("");
+  }
+
+  function startEditContract(contract) {
     setDraft({
-      name: "",
-      vendor: "",
-      trade: "",
-      amount: "",
-      status: "草稿",
-      contact: "",
-      phone: "",
-      email: "",
-      address: "",
-      note: "",
-      attachments: [],
+      ...emptyDraft,
+      ...contract,
+      amount: contract.amount ?? "",
+      attachments: contract.attachments || [],
     });
+    setEditingId(contract.id);
+    setAdding(true);
   }
 
   async function saveContract() {
     const next = {
-      id: Date.now(),
+      id: editingId || Date.now(),
       projectId: p.id,
       projectName: p.name,
       name: draft.name || "未命名合約",
@@ -4597,7 +4774,11 @@ function Contracts({ p, items, onSave, onDelete }) {
       note: draft.note,
       attachments: draft.attachments || [],
     };
-    await onSave(next, { title: next.name, status: next.status });
+    if (editingId && onUpdate) {
+      await onUpdate(editingId, next, { title: next.name, status: next.status });
+    } else {
+      await onSave(next, { title: next.name, status: next.status });
+    }
     resetDraft();
     setAdding(false);
   }
@@ -4614,7 +4795,10 @@ function Contracts({ p, items, onSave, onDelete }) {
       title="工程合約"
       sub={`目前工地：${p.name}`}
       btn="新增合約"
-      onAdd={() => setAdding(true)}
+      onAdd={() => {
+        resetDraft();
+        setAdding(true);
+      }}
       items={exportControls.filteredRecords}
       toolbar={<RecordExportToolbar controls={exportControls} placeholder="搜尋合約、廠商、工種、聯絡人或電話" />}
       emptyText={items.length ? "找不到符合條件的合約資料。" : "尚無工程合約資料，請新增第一份合約。"}
@@ -4653,6 +4837,7 @@ function Contracts({ p, items, onSave, onDelete }) {
                 <FileDown className="mr-1 h-3.5 w-3.5" />
                 列印本筆
               </Button>
+              <EditButton label={contract.name} onClick={() => startEditContract(contract)} />
               <Del label={contract.name} onClick={() => onDelete(contract.id)} />
             </div>
           </CardContent>
@@ -4781,7 +4966,7 @@ function Contracts({ p, items, onSave, onDelete }) {
               </Button>
               <Button type="button" onClick={saveContract}>
                 <Save className="mr-2 h-4 w-4" />
-                儲存合約
+                {editingId ? "更新合約" : "儲存合約"}
               </Button>
             </ActionBar>
           </CardContent>
@@ -4791,20 +4976,38 @@ function Contracts({ p, items, onSave, onDelete }) {
   );
 }
 
-function Memos({ p, items, onSave, onDelete }) {
+function Memos({ p, items, onSave, onUpdate, onDelete }) {
   const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState({
+  const emptyDraft = {
     trade: "",
     title: "",
     date: todayKey(),
     note: "",
     status: "待處理",
     attachments: [],
-  });
+  };
+  const [draft, setDraft] = useState(emptyDraft);
+  const [editingId, setEditingId] = useState("");
+
+  function resetDraft() {
+    setDraft({ ...emptyDraft, date: todayKey() });
+    setEditingId("");
+  }
+
+  function startEditMemo(memo) {
+    setDraft({
+      ...emptyDraft,
+      ...memo,
+      date: memo.date || todayKey(),
+      attachments: memo.attachments || [],
+    });
+    setEditingId(memo.id);
+    setAdding(true);
+  }
 
   async function saveMemo() {
     const next = {
-      id: Date.now(),
+      id: editingId || Date.now(),
       projectId: p.id,
       projectName: p.name,
       trade: draft.trade || "未分類工項",
@@ -4814,8 +5017,12 @@ function Memos({ p, items, onSave, onDelete }) {
       status: draft.status,
       attachments: draft.attachments || [],
     };
-    await onSave(next, { title: next.title, status: next.status });
-    setDraft({ trade: "", title: "", date: todayKey(), note: "", status: "待處理", attachments: [] });
+    if (editingId && onUpdate) {
+      await onUpdate(editingId, next, { title: next.title, status: next.status });
+    } else {
+      await onSave(next, { title: next.title, status: next.status });
+    }
+    resetDraft();
     setAdding(false);
   }
 
@@ -4830,7 +5037,10 @@ function Memos({ p, items, onSave, onDelete }) {
     <ListPage
       title="工項 Memo 紀錄"
       sub={`目前工地：${p.name}`}
-      onAdd={() => setAdding(true)}
+      onAdd={() => {
+        resetDraft();
+        setAdding(true);
+      }}
       items={exportControls.filteredRecords}
       toolbar={<RecordExportToolbar controls={exportControls} placeholder="搜尋工項、標題、內容或狀態" />}
       emptyText={items.length ? "找不到符合條件的 Memo。" : "尚無工項 Memo，請新增第一筆紀錄。"}
@@ -4857,6 +5067,7 @@ function Memos({ p, items, onSave, onDelete }) {
                 <FileDown className="mr-1 h-3.5 w-3.5" />
                 列印本筆
               </Button>
+              <EditButton label={x.title} onClick={() => startEditMemo(x)} />
               <Del label={x.title} onClick={() => onDelete(x.id)} />
             </div>
           </CardContent>
@@ -4921,12 +5132,19 @@ function Memos({ p, items, onSave, onDelete }) {
               onChange={(attachments) => setDraft({ ...draft, attachments })}
             />
             <ActionBar className="md:col-span-2">
-              <Button type="button" variant="outline" onClick={() => setAdding(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  resetDraft();
+                  setAdding(false);
+                }}
+              >
                 取消
               </Button>
               <Button type="button" onClick={saveMemo}>
                 <Save className="mr-2 h-4 w-4" />
-                儲存 Memo
+                {editingId ? "更新 Memo" : "儲存 Memo"}
               </Button>
             </ActionBar>
           </CardContent>
@@ -4944,7 +5162,25 @@ function Checklists({ p }) {
     items: [{ id: 1, text: "" }],
     attachments: [],
   });
+  const [editingId, setEditingId] = useState("");
   const [formError, setFormError] = useState("");
+
+  function resetDraft() {
+    setDraft({ stage: "", items: [{ id: Date.now(), text: "" }], attachments: [] });
+    setEditingId("");
+  }
+
+  function startEditChecklist(stage) {
+    setDraft({
+      stage: stage.stage || "",
+      items: (stage.items || []).length
+        ? stage.items.map((item, index) => ({ id: `${stage.id || Date.now()}-${index}`, text: item }))
+        : [{ id: Date.now(), text: "" }],
+      attachments: stage.attachments || [],
+    });
+    setEditingId(stage.id);
+    setAdding(true);
+  }
 
   function addDraftItem() {
     setDraft((current) => ({
@@ -4980,16 +5216,31 @@ function Checklists({ p }) {
 
     const next = {
       stage: draft.stage.trim(),
-      done: 0,
       items: nextItems,
       attachments: draft.attachments || [],
       projectId: p.id,
       projectName: p.name,
     };
+    const existing = editingId ? items.find((item) => item.id === editingId) : null;
+    const checkedItems = existing
+      ? (Array.isArray(existing.checkedItems)
+          ? existing.checkedItems
+          : existing.items?.slice(0, existing.done || 0) || []
+        ).filter((item) => nextItems.includes(item))
+      : [];
+    next.checkedItems = checkedItems;
+    next.done = checkedItems.length;
 
     setFormError("");
-    await saveItem(next, { title: next.stage, status: "未完成" });
-    setDraft({ stage: "", items: [{ id: Date.now(), text: "" }], attachments: [] });
+    if (editingId) {
+      await updateItem(editingId, next, {
+        title: next.stage,
+        status: next.done >= next.items.length ? "已完成" : "未完成",
+      });
+    } else {
+      await saveItem(next, { title: next.stage, status: "未完成" });
+    }
+    resetDraft();
     setAdding(false);
   }
 
@@ -5046,7 +5297,10 @@ function Checklists({ p }) {
         title="工地各階段檢核表"
         sub={`目前工地：${p.name}`}
         btn="新增檢核表"
-        onAdd={() => setAdding(true)}
+        onAdd={() => {
+          resetDraft();
+          setAdding(true);
+        }}
       />
       {error || formError ? (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -5106,12 +5360,19 @@ function Checklists({ p }) {
               onChange={(attachments) => setDraft({ ...draft, attachments })}
             />
             <ActionBar className="md:col-span-2">
-              <Button type="button" variant="outline" onClick={() => setAdding(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  resetDraft();
+                  setAdding(false);
+                }}
+              >
                 取消
               </Button>
               <Button type="button" onClick={saveChecklist}>
                 <Save className="mr-2 h-4 w-4" />
-                儲存檢核表
+                {editingId ? "更新檢核表" : "儲存檢核表"}
               </Button>
             </ActionBar>
           </CardContent>
@@ -5145,6 +5406,7 @@ function Checklists({ p }) {
                     >
                       <FileDown className="h-4 w-4" />
                     </Button>
+                    <EditButton icon label={s.stage} onClick={() => startEditChecklist(s)} />
                     <Del icon label={s.stage} onClick={() => deleteItem(s.id)} />
                   </div>
                 </div>
@@ -5214,6 +5476,7 @@ function Daily({ p, records = {} }) {
   const [aiMessage, setAiMessage] = useState("");
   const [aiSummary, setAiSummary] = useState(null);
   const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState("");
   const [dateFromQuery, setDateFromQuery] = useState("");
   const [dateToQuery, setDateToQuery] = useState("");
   const [keywordQuery, setKeywordQuery] = useState("");
@@ -5223,6 +5486,7 @@ function Daily({ p, records = {} }) {
   const {
     items: savedReports = [],
     saveItem: saveDailyRecord = async () => null,
+    updateItem: updateDailyRecord = async () => null,
     deleteItem: deleteDailyRecord = () => {},
     loading: dailyLoading = false,
     error: dailyError = "",
@@ -5234,6 +5498,7 @@ function Daily({ p, records = {} }) {
   const rem = (set, id) => set((items) => (items.length === 1 ? items : items.filter((x) => x.id !== id)));
 
   function resetDaily() {
+    setEditingId("");
     setReportDate("");
     setDayWeather("");
     setWeatherNote("");
@@ -5250,6 +5515,24 @@ function Daily({ p, records = {} }) {
 
   function openDailyForm() {
     resetDaily();
+    setAdding(true);
+    setOpenReportId("");
+  }
+
+  function startEditDaily(report) {
+    setEditingId(report.id);
+    setReportDate(report.date && report.date !== "未填日期" ? report.date : "");
+    setDayWeather(report.weather && report.weather !== "未選擇" ? report.weather : "");
+    setWeatherNote(report.weatherNote || "");
+    setDailyNote(report.dailyNote || report.note || "");
+    setPaperReport(report.sourceAttachment || null);
+    setSitePhotos(report.attachments || []);
+    setAiStatus("idle");
+    setAiMessage("");
+    setAiSummary(report.aiSummary || null);
+    setWork(withRowIds(report.work || [], empty.work));
+    setMat(withRowIds(report.materials || [], empty.mat));
+    setEq(withRowIds(report.equipment || [], empty.eq));
     setAdding(true);
     setOpenReportId("");
   }
@@ -5322,7 +5605,7 @@ function Daily({ p, records = {} }) {
   async function saveDaily() {
     const totalWorkers = work.reduce((total, row) => total + Number(row.workers || 0), 0);
     const next = {
-      id: Date.now(),
+      id: editingId || Date.now(),
       date: reportDate || "未填日期",
       weather: dayWeather || "未選擇",
       weatherNote,
@@ -5341,10 +5624,17 @@ function Daily({ p, records = {} }) {
       projectName: p.name,
     };
 
-    await saveDailyRecord(next, {
-      title: `${next.date} 施工日報`,
-      status: next.weather,
-    });
+    if (editingId) {
+      await updateDailyRecord(editingId, next, {
+        title: `${next.date} 施工日報`,
+        status: next.weather,
+      });
+    } else {
+      await saveDailyRecord(next, {
+        title: `${next.date} 施工日報`,
+        status: next.weather,
+      });
+    }
     resetDaily();
     setAdding(false);
   }
@@ -5637,7 +5927,7 @@ function Daily({ p, records = {} }) {
             </Button>
             <Button type="button" onClick={saveDaily}>
               <Save className="mr-2 h-4 w-4" />
-              確認並儲存日報
+              {editingId ? "更新日報" : "確認並儲存日報"}
             </Button>
           </ActionBar>
           </CardContent>
@@ -5777,6 +6067,7 @@ function Daily({ p, records = {} }) {
                         列印本張
                       </Button>
                     ) : null}
+                    <EditButton icon label={`${report.date} 施工日報`} onClick={() => startEditDaily(report)} />
                     <Del icon label={`${report.date} 施工日報`} onClick={() => deleteDailyRecord(report.id)} />
                   </div>
                 </div>
@@ -5932,9 +6223,10 @@ function stripRowIds(rows = []) {
 }
 
 function Meetings({ p }) {
-  const { items, saveItem, deleteItem, loading, error } = useProjectRecords(p, "meetings", []);
+  const { items, saveItem, updateItem: updateMeetingRecord, deleteItem, loading, error } = useProjectRecords(p, "meetings", []);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState(() => createMeetingDraft(p));
+  const [editingId, setEditingId] = useState("");
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState("");
   const [exportFrom, setExportFrom] = useState("");
@@ -5944,6 +6236,32 @@ function Meetings({ p }) {
 
   function resetDraft() {
     setDraft(createMeetingDraft(p));
+    setEditingId("");
+  }
+
+  function startEditMeeting(record) {
+    setDraft({
+      ...createMeetingDraft(p),
+      ...record,
+      attendees: withRowIds(record.attendees || [], {
+        name: "",
+        company: "",
+        role: "",
+        note: "",
+      }),
+      items: withRowIds(record.items || [], {
+        topic: "",
+        content: "",
+        decision: "",
+        owner: "",
+        dueDate: "",
+        note: "",
+      }),
+      attachments: record.attachments || [],
+    });
+    setEditingId(record.id);
+    setAdding(true);
+    setOpenId("");
   }
 
   function updateAttendee(id, key, value) {
@@ -5999,6 +6317,7 @@ function Meetings({ p }) {
     const meetingItems = stripRowIds(draft.items);
     const next = {
       ...draft,
+      id: editingId || Date.now(),
       title: draft.title || `${draft.meetingType}紀錄`,
       location: draft.location || "未填寫",
       chair: draft.chair || "未填寫",
@@ -6012,10 +6331,17 @@ function Meetings({ p }) {
       projectName: p.name,
     };
 
-    await saveItem(next, {
-      title: `${next.date} ${next.title}`,
-      status: next.meetingType,
-    });
+    if (editingId) {
+      await updateMeetingRecord(editingId, next, {
+        title: `${next.date} ${next.title}`,
+        status: next.meetingType,
+      });
+    } else {
+      await saveItem(next, {
+        title: `${next.date} ${next.title}`,
+        status: next.meetingType,
+      });
+    }
     resetDraft();
     setAdding(false);
   }
@@ -6274,7 +6600,7 @@ function Meetings({ p }) {
               </Button>
               <Button type="button" onClick={saveMeeting}>
                 <Save className="mr-2 h-4 w-4" />
-                儲存會議紀錄
+                {editingId ? "更新會議紀錄" : "儲存會議紀錄"}
               </Button>
             </ActionBar>
           </CardContent>
@@ -6397,6 +6723,7 @@ function Meetings({ p }) {
                           列印本筆
                         </Button>
                       ) : null}
+                      <EditButton icon label={`${record.date} ${record.title}`} onClick={() => startEditMeeting(record)} />
                       <Del icon label={`${record.date} ${record.title}`} onClick={() => deleteItem(record.id)} />
                     </div>
                   </div>
@@ -6509,10 +6836,10 @@ function Rows({ title, list, add, del: remove, render }) {
 }
 
 function Defects({ p }) {
-  const { items, saveItem, deleteItem, loading, error } = useProjectRecords(p, "defects", defectSeed);
+  const { items, saveItem, updateItem, deleteItem, loading, error } = useProjectRecords(p, "defects", defectSeed);
   const [adding, setAdding] = useState(false);
   const [formError, setFormError] = useState("");
-  const [draft, setDraft] = useState({
+  const emptyDraft = {
     location: "",
     type: "",
     vendor: "",
@@ -6520,11 +6847,28 @@ function Defects({ p }) {
     status: "待改善",
     level: "一般",
     attachments: [],
-  });
+  };
+  const [draft, setDraft] = useState(emptyDraft);
+  const [editingId, setEditingId] = useState("");
+
+  function resetDraft() {
+    setDraft(emptyDraft);
+    setEditingId("");
+  }
+
+  function startEditDefect(defect) {
+    setDraft({
+      ...emptyDraft,
+      ...defect,
+      attachments: defect.attachments || [],
+    });
+    setEditingId(defect.id);
+    setAdding(true);
+  }
 
   async function saveDefect() {
     const next = {
-      id: Date.now(),
+      id: editingId || Date.now(),
       location: draft.location || "未填寫位置",
       type: draft.type || "未分類",
       vendor: draft.vendor || "未指定",
@@ -6535,19 +6879,18 @@ function Defects({ p }) {
     };
 
     setFormError("");
-    await saveItem(next, {
-      title: `${next.location} ${next.type}`,
-      status: next.status,
-    });
-    setDraft({
-      location: "",
-      type: "",
-      vendor: "",
-      due: "",
-      status: "待改善",
-      level: "一般",
-      attachments: [],
-    });
+    if (editingId) {
+      await updateItem(editingId, next, {
+        title: `${next.location} ${next.type}`,
+        status: next.status,
+      });
+    } else {
+      await saveItem(next, {
+        title: `${next.location} ${next.type}`,
+        status: next.status,
+      });
+    }
+    resetDraft();
     setAdding(false);
   }
 
@@ -6563,7 +6906,10 @@ function Defects({ p }) {
       <Header
         title="缺失改善"
         sub={`目前工地：${p.name}`}
-        onAdd={() => setAdding(true)}
+        onAdd={() => {
+          resetDraft();
+          setAdding(true);
+        }}
       />
       {error || formError ? (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -6645,12 +6991,19 @@ function Defects({ p }) {
               onChange={(attachments) => setDraft({ ...draft, attachments })}
             />
             <ActionBar className="md:col-span-2">
-              <Button type="button" variant="outline" onClick={() => setAdding(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  resetDraft();
+                  setAdding(false);
+                }}
+              >
                 取消
               </Button>
               <Button type="button" onClick={saveDefect}>
                 <Save className="mr-2 h-4 w-4" />
-                儲存缺失
+                {editingId ? "更新缺失" : "儲存缺失"}
               </Button>
             </ActionBar>
           </CardContent>
@@ -6684,6 +7037,7 @@ function Defects({ p }) {
                 <FileDown className="mr-1 h-3.5 w-3.5" />
                 列印本筆
               </Button>
+              <EditButton label={`${x.location} ${x.type}`} onClick={() => startEditDefect(x)} />
               <Del label={`${x.location} ${x.type}`} onClick={() => deleteItem(x.id)} />
             </div>
           </CardContent>
@@ -6718,31 +7072,50 @@ function ListPage({ title, sub, items, render, onAdd, btn, children, toolbar, em
   );
 }
 
-function Todos({ p, items, onSave, onDelete }) {
+function ModuleRestricted({ title, message }) {
+  return (
+    <Card>
+      <CardContent className="p-8 text-center text-slate-500">
+        <ShieldCheck className="mx-auto h-8 w-8 text-slate-400" />
+        <h2 className="mt-3 text-lg font-bold text-slate-900">{title}</h2>
+        <p className="mt-2 text-sm">{message}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function Todos({ p, items, onSave, onUpdate, onDelete }) {
   const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState({
+  const emptyDraft = {
     title: "",
     owner: "",
     date: todayKey(),
     status: "一般",
     note: "",
     attachments: [],
-  });
+  };
+  const [draft, setDraft] = useState(emptyDraft);
+  const [editingId, setEditingId] = useState("");
 
   function resetDraft() {
+    setDraft({ ...emptyDraft, date: todayKey() });
+    setEditingId("");
+  }
+
+  function startEditTodo(todo) {
     setDraft({
-      title: "",
-      owner: "",
-      date: todayKey(),
-      status: "一般",
-      note: "",
-      attachments: [],
+      ...emptyDraft,
+      ...todo,
+      date: todo.date || todayKey(),
+      attachments: todo.attachments || [],
     });
+    setEditingId(todo.id);
+    setAdding(true);
   }
 
   async function saveTodo() {
     const next = {
-      id: Date.now(),
+      id: editingId || Date.now(),
       projectId: p.id,
       projectName: p.name,
       title: draft.title || "未命名待辦",
@@ -6752,7 +7125,11 @@ function Todos({ p, items, onSave, onDelete }) {
       note: draft.note,
       attachments: draft.attachments || [],
     };
-    await onSave(next, { title: next.title, status: next.status });
+    if (editingId && onUpdate) {
+      await onUpdate(editingId, next, { title: next.title, status: next.status });
+    } else {
+      await onSave(next, { title: next.title, status: next.status });
+    }
     resetDraft();
     setAdding(false);
   }
@@ -6769,7 +7146,10 @@ function Todos({ p, items, onSave, onDelete }) {
       title="待辦事項"
       sub={`目前工地：${p.name}`}
       btn="新增待辦"
-      onAdd={() => setAdding(true)}
+      onAdd={() => {
+        resetDraft();
+        setAdding(true);
+      }}
       items={exportControls.filteredRecords}
       toolbar={<RecordExportToolbar controls={exportControls} placeholder="搜尋待辦事項、負責人、日期、優先度或備註" />}
       emptyText={items.length ? "找不到符合條件的待辦事項。" : "尚無待辦事項，請新增第一筆待辦。"}
@@ -6799,6 +7179,7 @@ function Todos({ p, items, onSave, onDelete }) {
                 <FileDown className="mr-1 h-3.5 w-3.5" />
                 列印本筆
               </Button>
+              <EditButton label={todo.title} onClick={() => startEditTodo(todo)} />
               <Del label={todo.title} onClick={() => onDelete(todo.id)} />
             </div>
           </CardContent>
@@ -6875,7 +7256,7 @@ function Todos({ p, items, onSave, onDelete }) {
               </Button>
               <Button type="button" onClick={saveTodo}>
                 <Save className="mr-2 h-4 w-4" />
-                儲存待辦
+                {editingId ? "更新待辦" : "儲存待辦"}
               </Button>
             </ActionBar>
           </CardContent>
@@ -6911,9 +7292,10 @@ function scheduleChartRange(project, items) {
   return normalizeDateRange(start, end);
 }
 
-function Schedule({ p, items, onSave, onDelete }) {
+function Schedule({ p, items, onSave, onUpdate, onDelete }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState(() => createScheduleDraft(p));
+  const [editingId, setEditingId] = useState("");
 
   const chartRange = useMemo(() => scheduleChartRange(p, items), [p, items]);
   const dates = useMemo(
@@ -6939,13 +7321,24 @@ function Schedule({ p, items, onSave, onDelete }) {
 
   function resetDraft() {
     setDraft(createScheduleDraft(p));
+    setEditingId("");
+  }
+
+  function startEditSchedule(item) {
+    setDraft({
+      ...createScheduleDraft(p),
+      ...item,
+      attachments: item.attachments || [],
+    });
+    setEditingId(item.id);
+    setAdding(true);
   }
 
   async function saveSchedule() {
     const { start, end } = normalizeDateRange(draft.startDate, draft.endDate);
     const trade = draft.trade || "未分類工種";
     const next = {
-      id: Date.now(),
+      id: editingId || Date.now(),
       projectId: p.id,
       projectName: p.name,
       ...draft,
@@ -6956,7 +7349,11 @@ function Schedule({ p, items, onSave, onDelete }) {
       name: draft.name || `${trade}預定進度`,
     };
 
-    await onSave(next, { title: next.name, status: next.status });
+    if (editingId && onUpdate) {
+      await onUpdate(editingId, next, { title: next.name, status: next.status });
+    } else {
+      await onSave(next, { title: next.name, status: next.status });
+    }
     resetDraft();
     setAdding(false);
   }
@@ -6967,7 +7364,10 @@ function Schedule({ p, items, onSave, onDelete }) {
         title="預定進度"
         sub={`目前工地：${p.name}，表單儲存後會立即更新下方甘特圖`}
         btn="新增進度節點"
-        onAdd={() => setAdding(true)}
+        onAdd={() => {
+          resetDraft();
+          setAdding(true);
+        }}
       />
 
       <div className="mb-4 grid gap-4 sm:grid-cols-3">
@@ -7073,7 +7473,7 @@ function Schedule({ p, items, onSave, onDelete }) {
               </Button>
               <Button type="button" onClick={saveSchedule}>
                 <Save className="mr-2 h-4 w-4" />
-                儲存並更新圖表
+                {editingId ? "更新並同步圖表" : "儲存並更新圖表"}
               </Button>
             </ActionBar>
           </CardContent>
@@ -7215,7 +7615,10 @@ function Schedule({ p, items, onSave, onDelete }) {
                   {item.note ? <p className="text-sm text-slate-500">{item.note}</p> : null}
                   <AttachmentSummary attachments={item.attachments} />
                 </div>
-                <Del label={item.name} onClick={() => onDelete(item.id)} />
+                <div className="flex flex-wrap items-start gap-2 sm:justify-end">
+                  <EditButton label={item.name} onClick={() => startEditSchedule(item)} />
+                  <Del label={item.name} onClick={() => onDelete(item.id)} />
+                </div>
               </CardContent>
             </Card>
           ))
@@ -7291,6 +7694,15 @@ function Manual() {
   const versionNotes = [
     {
       version: APP_VERSION,
+      title: "表單編輯與文件閱覽權限",
+      items: [
+        "各主要表單的已儲存資料新增編輯按鈕，可直接回填原表單更新內容。",
+        "工地成員權限新增請款文件與合約文件閱覽設定，可針對內外部成員分開控管。",
+        "工地職稱選單新增財務、會計、行政、採購、估算與內業工程師等內業職稱。",
+      ],
+    },
+    {
+      version: "eztodo_26052606",
       title: "請款工作台重整",
       items: [
         "廠商請款新增合約請款與無合約 / 臨時發包兩種模式，可依現場實際發包方式建檔。",
@@ -7575,9 +7987,11 @@ function Placeholder({ title, p }) {
   }, { attachments: [] });
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState(emptyDraft);
+  const [editingId, setEditingId] = useState("");
   const {
     items: records,
     saveItem,
+    updateItem,
     deleteItem,
     loading,
     error,
@@ -7592,17 +8006,36 @@ function Placeholder({ title, p }) {
   async function saveRecord() {
     const next = {
       ...draft,
+      id: editingId || Date.now(),
       name: draft.name || `${title}資料`,
       projectId: p.id,
       projectName: p.name,
     };
 
-    await saveItem(next, {
-      title: next.name,
-      status: next.status || "",
-    });
+    if (editingId) {
+      await updateItem(editingId, next, {
+        title: next.name,
+        status: next.status || "",
+      });
+    } else {
+      await saveItem(next, {
+        title: next.name,
+        status: next.status || "",
+      });
+    }
     setDraft(emptyDraft);
+    setEditingId("");
     setAdding(false);
+  }
+
+  function startEditRecord(record) {
+    setDraft({
+      ...emptyDraft,
+      ...record,
+      attachments: record.attachments || [],
+    });
+    setEditingId(record.id);
+    setAdding(true);
   }
 
   return (
@@ -7611,7 +8044,11 @@ function Placeholder({ title, p }) {
         title={title}
         sub={`目前工地：${p.name}`}
         btn={schema.btn}
-        onAdd={() => setAdding(true)}
+        onAdd={() => {
+          setDraft(emptyDraft);
+          setEditingId("");
+          setAdding(true);
+        }}
       />
       {error ? (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -7657,12 +8094,20 @@ function Placeholder({ title, p }) {
               onChange={(attachments) => setDraft({ ...draft, attachments })}
             />
             <ActionBar className="md:col-span-2">
-              <Button type="button" variant="outline" onClick={() => setAdding(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setDraft(emptyDraft);
+                  setEditingId("");
+                  setAdding(false);
+                }}
+              >
                 取消
               </Button>
               <Button type="button" onClick={saveRecord}>
                 <Save className="mr-2 h-4 w-4" />
-                儲存
+                {editingId ? "更新" : "儲存"}
               </Button>
             </ActionBar>
           </CardContent>
@@ -7707,6 +8152,7 @@ function Placeholder({ title, p }) {
                     <FileDown className="mr-1 h-3.5 w-3.5" />
                     列印本筆
                   </Button>
+                  <EditButton label={record.name} onClick={() => startEditRecord(record)} />
                   <Del label={record.name} onClick={() => deleteItem(record.id)} />
                 </div>
               </CardContent>
@@ -8647,6 +9093,10 @@ export default function App() {
 
   const page = useMemo(() => {
     if (!p) return null;
+    const restriction = projectModuleRestriction(p, active);
+    if (restriction) {
+      return <ModuleRestricted title={mods.find((x) => x.id === active)?.label || "功能受限"} message={restriction} />;
+    }
     const projectContracts = contractRecords.items;
     const projectClaims = claimRecords.items;
     const projectMemos = memoRecords.items;
@@ -8675,6 +9125,7 @@ export default function App() {
           claims={projectClaims}
           contracts={projectContracts}
           onSave={(item, options) => claimRecords.saveItem(item, options)}
+          onUpdate={(id, item, options) => claimRecords.updateItem(id, item, options)}
           onDelete={claimRecords.deleteItem}
         />
       );
@@ -8685,6 +9136,7 @@ export default function App() {
           p={p}
           items={projectContracts}
           onSave={(item, options) => contractRecords.saveItem(item, options)}
+          onUpdate={(id, item, options) => contractRecords.updateItem(id, item, options)}
           onDelete={contractRecords.deleteItem}
         />
       );
@@ -8695,6 +9147,7 @@ export default function App() {
           p={p}
           items={projectMemos}
           onSave={(item, options) => memoRecords.saveItem(item, options)}
+          onUpdate={(id, item, options) => memoRecords.updateItem(id, item, options)}
           onDelete={memoRecords.deleteItem}
         />
       );
@@ -8706,6 +9159,7 @@ export default function App() {
           p={p}
           items={projectScheduleItems}
           onSave={(item, options) => scheduleRecords.saveItem(item, options)}
+          onUpdate={(id, item, options) => scheduleRecords.updateItem(id, item, options)}
           onDelete={scheduleRecords.deleteItem}
         />
       );
@@ -8719,6 +9173,7 @@ export default function App() {
           p={p}
           items={projectTodoItems}
           onSave={(item, options) => todoRecords.saveItem(item, options)}
+          onUpdate={(id, item, options) => todoRecords.updateItem(id, item, options)}
           onDelete={todoRecords.deleteItem}
         />
       );
@@ -8779,7 +9234,8 @@ export default function App() {
     );
   }
 
-  const activeModule = mods.find((x) => x.id === active) || mods[0];
+  const visibleModules = mods.filter((module) => canUseProjectModule(p, module.id));
+  const activeModule = visibleModules.find((x) => x.id === active) || visibleModules[0] || mods[0];
   const ActiveModuleIcon = activeModule.icon;
 
   return (
@@ -8889,7 +9345,7 @@ export default function App() {
                 />
               </button>
               <nav className={`${moduleListOpen ? "grid" : "hidden"} mt-3 gap-2`}>
-                {mods.map((m) => {
+                {visibleModules.map((m) => {
                   const Icon = m.icon;
                   return (
                     <button

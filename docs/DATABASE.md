@@ -66,11 +66,13 @@
 | `member_role` | `text` | `owner`、`manager`、`editor`、`viewer` |
 | `can_view` | `boolean` | 是否可查看此工地 |
 | `can_edit` | `boolean` | 是否可編輯此工地資料 |
+| `can_view_claims` | `boolean` | 是否可閱覽請款相關文件 |
+| `can_view_contracts` | `boolean` | 是否可閱覽合約相關文件 |
 | `job_title` | `text` | 該成員在此工地的職務名稱 |
 | `created_by` | `text` | 邀請人 `users.id` |
 | `created_at` | `timestamptz` | 加入時間 |
 
-建立工地時，建立者會自動成為 `owner`。`manager` 可作為共同管理者管理成員與編輯資料；`editor` 可編輯資料但不能管理成員；`viewer` 只能閱覽。工地建立者可替受邀成員設定該工地的職務名稱。
+建立工地時，建立者會自動成為 `owner`。`manager` 可作為共同管理者管理成員與編輯資料；`editor` 可編輯資料但不能管理成員；`viewer` 只能閱覽。工地建立者可替受邀成員設定該工地的職務名稱，並可獨立控制請款與合約文件閱覽權限。
 
 ### `project_records`
 

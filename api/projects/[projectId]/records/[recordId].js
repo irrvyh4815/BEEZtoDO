@@ -1,6 +1,7 @@
 import {
   deleteProjectRecord,
   ensureSchema,
+  getProjectRecord,
   updateProjectRecord,
 } from "../../../_lib/db.js";
 import {
@@ -10,7 +11,7 @@ import {
   methodNotAllowed,
   readJson,
 } from "../../../_lib/http.js";
-import { requireProjectAccess } from "../../../_lib/permissions.js";
+import { requireProjectAccess, requireProjectModuleAccess } from "../../../_lib/permissions.js";
 
 function idsFromUrl(url) {
   const parts = new URL(url).pathname.split("/").filter(Boolean);
@@ -38,6 +39,11 @@ export default {
       }
 
       await requireProjectAccess(request, projectId, "edit");
+      const existingRecord = await getProjectRecord(projectId, recordId);
+      if (!existingRecord) {
+        throw new ApiError(404, "找不到紀錄", "RECORD_NOT_FOUND");
+      }
+      await requireProjectModuleAccess(request, projectId, existingRecord.module, "edit");
 
       if (request.method === "PATCH") {
         const body = await readJson(request);
@@ -46,9 +52,6 @@ export default {
         }
 
         const record = await updateProjectRecord(projectId, recordId, body);
-        if (!record) {
-          throw new ApiError(404, "找不到紀錄", "RECORD_NOT_FOUND");
-        }
 
         return json({ record });
       }
