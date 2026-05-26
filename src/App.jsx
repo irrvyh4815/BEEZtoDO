@@ -110,7 +110,7 @@ const mods = [
   ["photos", "照片中心"],
 ].map(([id, label]) => ({ id, label, icon: I[id] }));
 
-const APP_VERSION = "eztodo_26052604";
+const APP_VERSION = "eztodo_26052605";
 const SAMPLE_PROJECT_NAME = "範例工地：東區住宅新建工程";
 const DAILY_AI_SOURCE_MAX_BYTES = 3 * 1024 * 1024;
 
@@ -1074,6 +1074,93 @@ function attachmentPrintHtml(attachments = []) {
   `;
 }
 
+function compactA4PrintOverrides() {
+  return `
+    @page { size: A4; margin: 10mm; }
+    body { font-size: 12px; line-height: 1.42; }
+    h1 { font-size: 22px; margin-top: 4px; }
+    h2 { font-size: 16px; }
+    .cover {
+      margin-bottom: 10px;
+      padding-bottom: 10px;
+    }
+    .eyebrow { font-size: 11px; }
+    .meta, .summary {
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .summary { margin-bottom: 12px; }
+    .meta div, .summary div {
+      border-radius: 6px;
+      padding: 6px 8px;
+    }
+    .label { font-size: 10px; }
+    .value { font-size: 12px; }
+    .report, .record {
+      break-inside: auto;
+      page-break-inside: auto;
+      border-radius: 8px;
+      margin-bottom: 10px;
+      overflow: visible;
+    }
+    .report-header, .record-header {
+      break-after: avoid;
+      page-break-after: avoid;
+      padding: 8px 10px;
+    }
+    .report-body, .record-body { padding: 8px 10px; }
+    .section {
+      break-inside: auto;
+      page-break-inside: auto;
+      margin-top: 8px;
+    }
+    .section h3 {
+      break-after: avoid;
+      page-break-after: avoid;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    table {
+      break-inside: auto;
+      page-break-inside: auto;
+      font-size: 11px;
+    }
+    tr {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    th, td { padding: 4px 6px; }
+    .note {
+      border-radius: 6px;
+      font-size: 11px;
+      min-height: 24px;
+      padding: 6px 8px;
+    }
+    .photos {
+      gap: 6px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    figure {
+      border-radius: 6px;
+      padding: 4px;
+    }
+    figure img {
+      max-height: 70mm;
+      object-fit: contain;
+    }
+    @media print {
+      .report, .record {
+        break-inside: auto !important;
+        page-break-inside: auto !important;
+      }
+      .report-header, .record-header, tr {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+    }
+  `;
+}
+
 function dailyReportsPrintHtml({ project, reports, from, to, includePhotos }) {
   const totalWorkers = reports.reduce((total, report) => total + Number(report.workers || 0), 0);
   const generatedAt = new Intl.DateTimeFormat("zh-TW", {
@@ -1204,6 +1291,7 @@ function dailyReportsPrintHtml({ project, reports, from, to, includePhotos }) {
             .no-print { display: none; }
             .report { page-break-inside: avoid; }
           }
+          ${compactA4PrintOverrides()}
         </style>
       </head>
       <body>
@@ -1482,6 +1570,7 @@ function meetingRecordsPrintHtml({ project, records, from, to, includeAttachment
             .no-print { display: none; }
             .record { page-break-inside: avoid; }
           }
+          ${compactA4PrintOverrides()}
         </style>
       </head>
       <body>
@@ -1577,6 +1666,525 @@ function openMeetingRecordsPdfExport(options) {
   printWindow.document.write(meetingRecordsPrintHtml(options));
   printWindow.document.close();
   return true;
+}
+
+function normalizeRecordDate(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "未填日期" || raw === "未設定") return "";
+  if (/^\d{4}\/\d{1,2}$/.test(raw)) {
+    const [year, month] = raw.split("/");
+    return `${year}-${month.padStart(2, "0")}-01`;
+  }
+  if (/^\d{4}-\d{1,2}$/.test(raw)) {
+    const [year, month] = raw.split("-");
+    return `${year}-${month.padStart(2, "0")}-01`;
+  }
+  if (/^\d{4}\/\d{1,2}\/\d{1,2}/.test(raw)) {
+    const [year, month, day] = raw.split(/[\/\s]/);
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+  return compareDateKey(raw);
+}
+
+function recordDateKey(record = {}) {
+  return normalizeRecordDate(
+    record.date ||
+      record.due ||
+      record.dueDate ||
+      record.month ||
+      record.startDate ||
+      record.endDate ||
+      record.createdAt,
+  );
+}
+
+function flattenRecordText(value) {
+  if (value == null) return "";
+  if (Array.isArray(value)) return value.map(flattenRecordText).join(" ");
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .filter(([key]) => !["attachments", "sourceAttachment", "file", "url"].includes(key))
+      .map(([, entry]) => flattenRecordText(entry))
+      .join(" ");
+  }
+  return String(value);
+}
+
+function printValue(value) {
+  if (value == null || value === "") return "未填寫";
+  return String(value);
+}
+
+function printFieldsHtml(fields = []) {
+  const cleanFields = fields.filter(Boolean);
+  if (!cleanFields.length) return `<p class="empty">未填寫資料</p>`;
+  const rows = [];
+  for (let index = 0; index < cleanFields.length; index += 2) {
+    rows.push(cleanFields.slice(index, index + 2));
+  }
+
+  return `
+    <table class="field-table">
+      <tbody>
+        ${rows
+          .map(
+            (row) => `
+              <tr>
+                ${row
+                  .map(
+                    ([label, value]) =>
+                      `<th>${escapeHtml(label)}</th><td>${escapeHtml(printValue(value))}</td>`,
+                  )
+                  .join("")}
+                ${row.length === 1 ? `<th></th><td></td>` : ""}
+              </tr>
+            `,
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function printRecordHtml(record, includeAttachments) {
+  return `
+    <article class="record">
+      <header class="record-header">
+        <div>
+          <h2>${escapeHtml(record.title || "未命名資料")}</h2>
+          ${record.subtitle ? `<p>${escapeHtml(record.subtitle)}</p>` : ""}
+        </div>
+        ${record.status ? `<p>${escapeHtml(record.status)}</p>` : ""}
+      </header>
+      <div class="record-body">
+        <section class="section">
+          <h3>基本資料</h3>
+          ${printFieldsHtml(record.fields || [])}
+        </section>
+        ${(record.tables || [])
+          .map(
+            (table) => `
+              <section class="section">
+                <h3>${escapeHtml(table.title)}</h3>
+                ${dailyReportRowsHtml(table.rows || [], table.columns || [])}
+              </section>
+            `,
+          )
+          .join("")}
+        ${
+          record.note
+            ? `<section class="section"><h3>備註</h3><div class="note">${escapeHtml(record.note)}</div></section>`
+            : ""
+        }
+        ${
+          includeAttachments
+            ? `<section class="section">
+                <h3>附件圖片</h3>
+                ${attachmentPrintHtml(record.attachments || [])}
+              </section>`
+            : ""
+        }
+      </div>
+    </article>
+  `;
+}
+
+function genericRecordsPrintHtml({
+  project,
+  title,
+  records,
+  from,
+  to,
+  includeAttachments,
+  buildPrintRecord,
+}) {
+  const generatedAt = new Intl.DateTimeFormat("zh-TW", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+  const printRecords = records.map(buildPrintRecord);
+
+  return `<!doctype html>
+    <html lang="zh-Hant">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(project.name)} ${escapeHtml(title)}匯出</title>
+        <style>
+          * { box-sizing: border-box; }
+          body {
+            color: #0f172a;
+            font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
+            margin: 0;
+          }
+          h1, h2, h3, p { margin: 0; }
+          .cover {
+            border-bottom: 2px solid #0f172a;
+          }
+          .meta, .summary {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+          .summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+          .meta div, .summary div {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+          }
+          .label { color: #64748b; display: block; }
+          .value { display: block; font-weight: 700; }
+          .record {
+            border: 1px solid #cbd5e1;
+            overflow: visible;
+          }
+          .record-header {
+            background: #0f172a;
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+          }
+          table {
+            border-collapse: collapse;
+            width: 100%;
+          }
+          th, td {
+            border: 1px solid #e2e8f0;
+            text-align: left;
+            vertical-align: top;
+            word-break: break-word;
+          }
+          th { background: #f8fafc; color: #475569; width: 18%; }
+          .note {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            white-space: pre-wrap;
+          }
+          .empty { color: #64748b; }
+          .photos {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+          figure {
+            border: 1px solid #e2e8f0;
+            margin: 0;
+            overflow: hidden;
+          }
+          figure img {
+            display: block;
+            object-fit: contain;
+            width: 100%;
+          }
+          figcaption {
+            color: #475569;
+            word-break: break-word;
+          }
+          .no-print { margin-top: 14px; }
+          .no-print button {
+            background: #0f172a;
+            border: 0;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            font: inherit;
+            padding: 8px 12px;
+          }
+          @media print { .no-print { display: none; } }
+          ${compactA4PrintOverrides()}
+        </style>
+      </head>
+      <body>
+        <section class="cover">
+          <p class="eyebrow">EZtoDO工程管理程式｜${escapeHtml(title)} PDF 匯出</p>
+          <h1>${escapeHtml(project.name)} ${escapeHtml(title)}彙整</h1>
+          <div class="meta">
+            <div><span class="label">工地地址</span><span class="value">${escapeHtml(project.address || "未填寫")}</span></div>
+            <div><span class="label">日期區間</span><span class="value">${escapeHtml(from || "不限")} 至 ${escapeHtml(to || "不限")}</span></div>
+            <div><span class="label">匯出時間</span><span class="value">${escapeHtml(generatedAt)}</span></div>
+            <div><span class="label">附件圖片</span><span class="value">${includeAttachments ? "包含" : "不包含"}</span></div>
+          </div>
+        </section>
+        <section class="summary">
+          <div><span class="label">匯出筆數</span><span class="value">${records.length}</span></div>
+          <div><span class="label">資料類型</span><span class="value">${escapeHtml(title)}</span></div>
+          <div><span class="label">匯出版本</span><span class="value">${escapeHtml(APP_VERSION)}</span></div>
+        </section>
+        ${printRecords.map((record) => printRecordHtml(record, includeAttachments)).join("")}
+        <div class="no-print">
+          <button type="button" onclick="window.print()">列印 / 另存 PDF</button>
+        </div>
+        <script>
+          window.addEventListener("load", () => {
+            setTimeout(() => window.print(), 400);
+          });
+        </script>
+      </body>
+    </html>`;
+}
+
+function openGenericRecordsPdfExport(options) {
+  const printWindow = window.open("", "_blank", "width=1100,height=800");
+  if (!printWindow) return false;
+  printWindow.document.open();
+  printWindow.document.write(genericRecordsPrintHtml(options));
+  printWindow.document.close();
+  return true;
+}
+
+function useRecordExport({ project, title, records, buildPrintRecord }) {
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [query, setQuery] = useState("");
+  const [includeAttachments, setIncludeAttachments] = useState(true);
+  const [exportError, setExportError] = useState("");
+
+  const filteredRecords = records.filter((record) => {
+    const keyword = query.trim().toLowerCase();
+    const matchesKeyword = !keyword || flattenRecordText(record).toLowerCase().includes(keyword);
+    const matchesDate = !dateFrom && !dateTo ? true : isDateInRange(recordDateKey(record), dateFrom, dateTo);
+    return matchesKeyword && matchesDate;
+  });
+
+  function exportRecords(targetRecords = filteredRecords, range = {}) {
+    const recordsToExport = [...targetRecords].sort((a, b) =>
+      recordDateKey(a).localeCompare(recordDateKey(b)),
+    );
+    if (!recordsToExport.length) {
+      setExportError("目前檢索條件內沒有可匯出的資料。");
+      return;
+    }
+
+    const opened = openGenericRecordsPdfExport({
+      project,
+      title,
+      records: recordsToExport,
+      from: range.from ?? dateFrom,
+      to: range.to ?? dateTo,
+      includeAttachments,
+      buildPrintRecord,
+    });
+
+    if (!opened) {
+      setExportError("瀏覽器封鎖了匯出視窗，請允許彈出視窗後再試一次。");
+      return;
+    }
+
+    setExportError("");
+  }
+
+  function clearFilters() {
+    setDateFrom("");
+    setDateTo("");
+    setQuery("");
+    setExportError("");
+  }
+
+  return {
+    dateFrom,
+    setDateFrom,
+    dateTo,
+    setDateTo,
+    query,
+    setQuery,
+    includeAttachments,
+    setIncludeAttachments,
+    exportError,
+    filteredRecords,
+    exportRecords,
+    clearFilters,
+  };
+}
+
+function RecordExportToolbar({ controls, placeholder = "搜尋資料內容" }) {
+  return (
+    <Card className="mb-4">
+      <CardContent className="p-4">
+        <div className="grid gap-2 xl:grid-cols-[150px_150px_minmax(220px,1fr)_auto_auto] xl:items-end">
+          <label>
+            <span className="text-xs font-medium text-slate-500">開始日期</span>
+            <div className="mt-1">
+              <Input type="date" value={controls.dateFrom} onChange={controls.setDateFrom} />
+            </div>
+          </label>
+          <label>
+            <span className="text-xs font-medium text-slate-500">結束日期</span>
+            <div className="mt-1">
+              <Input type="date" value={controls.dateTo} onChange={controls.setDateTo} />
+            </div>
+          </label>
+          <label>
+            <span className="text-xs font-medium text-slate-500">快速檢索</span>
+            <div className="mt-1">
+              <Input value={controls.query} onChange={controls.setQuery} ph={placeholder} />
+            </div>
+          </label>
+          <label className="flex min-h-11 items-center gap-2 rounded-xl border bg-slate-50 px-3 py-2 text-sm">
+            <input
+              type="checkbox"
+              checked={controls.includeAttachments}
+              onChange={(event) => controls.setIncludeAttachments(event.target.checked)}
+            />
+            包含附件
+          </label>
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-none xl:grid-flow-col">
+            <Button type="button" onClick={() => controls.exportRecords()}>
+              <FileDown className="mr-2 h-4 w-4" />
+              匯出 PDF
+            </Button>
+            <Button type="button" variant="outline" onClick={controls.clearFilters}>
+              清除
+            </Button>
+          </div>
+        </div>
+        <div className="mt-3 flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+          <p>目前符合：{controls.filteredRecords.length} 筆</p>
+          <p>匯出會依日期排序，並使用 A4 版面重新排版。</p>
+        </div>
+        {controls.exportError ? (
+          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {controls.exportError}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function buildClaimPrintRecord(record) {
+  return {
+    title: `${record.vendor || "未填寫廠商"} ${record.period || ""}`.trim(),
+    subtitle: record.contract,
+    status: record.status,
+    fields: [
+      ["廠商名稱", record.vendor],
+      ["工程類別", record.trade],
+      ["合約名稱", record.contract],
+      ["期別", record.period],
+      ["請款月份", record.month],
+      ["本期金額", twd(record.amount)],
+      ["狀態", record.status],
+    ],
+    attachments: record.attachments,
+  };
+}
+
+function buildContractPrintRecord(record) {
+  return {
+    title: record.name,
+    subtitle: `廠商：${record.vendor || "未填寫"}`,
+    status: record.status,
+    fields: [
+      ["合約名稱", record.name],
+      ["廠商", record.vendor],
+      ["工程類別", record.trade],
+      ["合約金額", twd(record.amount)],
+      ["狀態", record.status],
+      ["聯絡人", record.contact],
+      ["電話", record.phone],
+      ["Email", record.email],
+      ["地址", record.address],
+    ],
+    note: record.note,
+    attachments: record.attachments,
+  };
+}
+
+function buildMemoPrintRecord(record) {
+  return {
+    title: record.title,
+    subtitle: `${record.trade || "未分類工項"}｜${record.date || "未設定"}`,
+    status: record.status,
+    fields: [
+      ["日期", record.date],
+      ["工項", record.trade],
+      ["標題", record.title],
+      ["狀態", record.status],
+    ],
+    note: record.note,
+    attachments: record.attachments,
+  };
+}
+
+function buildChecklistPrintRecord(record) {
+  const checkedItems = Array.isArray(record.checkedItems)
+    ? record.checkedItems
+    : (record.items || []).slice(0, record.done || 0);
+
+  return {
+    title: record.stage,
+    subtitle: `已完成 ${record.done || 0}/${record.items?.length || 0}`,
+    status: (record.done || 0) >= (record.items?.length || 0) && record.items?.length ? "已完成" : "未完成",
+    fields: [
+      ["階段名稱", record.stage],
+      ["檢核項目數", record.items?.length || 0],
+      ["已完成", record.done || 0],
+    ],
+    tables: [
+      {
+        title: "檢核項目",
+        rows: (record.items || []).map((item, index) => ({
+          index: index + 1,
+          item,
+          status: checkedItems.includes(item) ? "完成" : "未完成",
+        })),
+        columns: [
+          ["index", "序"],
+          ["item", "項目"],
+          ["status", "狀態"],
+        ],
+      },
+    ],
+    attachments: record.attachments,
+  };
+}
+
+function buildDefectPrintRecord(record) {
+  return {
+    title: `${record.location || "未填寫位置"} ${record.type || ""}`.trim(),
+    subtitle: `負責廠商：${record.vendor || "未指定"}`,
+    status: record.status,
+    fields: [
+      ["缺失位置", record.location],
+      ["類型", record.type],
+      ["負責廠商", record.vendor],
+      ["改善期限", record.due],
+      ["狀態", record.status],
+      ["嚴重程度", record.level],
+    ],
+    attachments: record.attachments,
+  };
+}
+
+function buildTodoPrintRecord(record) {
+  return {
+    title: record.title,
+    subtitle: `負責人：${record.owner || "未指定"}｜日期：${record.date || "未設定"}`,
+    status: record.status,
+    fields: [
+      ["待辦事項", record.title],
+      ["負責人", record.owner],
+      ["日期", record.date],
+      ["優先度", record.status],
+    ],
+    note: record.note,
+    attachments: record.attachments,
+  };
+}
+
+function buildPlaceholderPrintRecord(record, schema) {
+  return {
+    title: record.name,
+    subtitle: schema.fields
+      .filter((field) => field.key !== "name" && record[field.key])
+      .slice(0, 2)
+      .map((field) => `${field.label}：${record[field.key]}`)
+      .join("｜"),
+    status: record.status,
+    fields: schema.fields.map((field) => [field.label, record[field.key]]),
+    note: record.note,
+    attachments: record.attachments,
+  };
 }
 
 function fileToDataUrl(file) {
@@ -2869,7 +3477,7 @@ function ProjectMembers({ project }) {
       <CardContent className="p-5">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h2 className="text-lg font-bold">工地成員與隔離權限</h2>
+            <h2 className="text-lg font-bold">工地成員與權限設定</h2>
             <p className="mt-1 text-sm text-slate-500">
               只有工地建立者、共同管理者與被邀請成員能看到此工地。
             </p>
@@ -3159,12 +3767,21 @@ function Claims({ p, claims, onSave, onDelete }) {
     setAdding(false);
   }
 
+  const exportControls = useRecordExport({
+    project: p,
+    title: "廠商請款資料",
+    records: claims,
+    buildPrintRecord: buildClaimPrintRecord,
+  });
+
   return (
     <ListPage
       title="廠商請款資料"
       sub={`目前工地：${p.name}`}
       onAdd={() => setAdding(true)}
-      items={claims}
+      items={exportControls.filteredRecords}
+      toolbar={<RecordExportToolbar controls={exportControls} placeholder="搜尋廠商、工種、合約、期別或狀態" />}
+      emptyText={claims.length ? "找不到符合條件的請款資料。" : "尚無廠商請款資料，請新增第一筆請款。"}
       render={(x) => (
         <Card key={`${x.vendor}-${x.period}-${x.month}`}>
           <CardContent className="flex flex-col justify-between gap-4 p-5 sm:flex-row">
@@ -3184,7 +3801,16 @@ function Claims({ p, claims, onSave, onDelete }) {
             <div className="text-left sm:text-right">
               <p className="text-sm text-slate-500">本期請款</p>
               <p className="text-2xl font-bold">{twd(x.amount)}</p>
-              <div className="mt-2">
+              <div className="mt-2 flex flex-wrap gap-2 sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => exportControls.exportRecords([x], { from: recordDateKey(x), to: recordDateKey(x) })}
+                >
+                  <FileDown className="mr-1 h-3.5 w-3.5" />
+                  列印本筆
+                </Button>
                 <Del label={`${x.vendor} ${x.period}`} onClick={() => onDelete(x.id)} />
               </div>
             </div>
@@ -3341,13 +3967,22 @@ function Contracts({ p, items, onSave, onDelete }) {
     setAdding(false);
   }
 
+  const exportControls = useRecordExport({
+    project: p,
+    title: "工程合約",
+    records: items,
+    buildPrintRecord: buildContractPrintRecord,
+  });
+
   return (
     <ListPage
       title="工程合約"
       sub={`目前工地：${p.name}`}
       btn="新增合約"
       onAdd={() => setAdding(true)}
-      items={items}
+      items={exportControls.filteredRecords}
+      toolbar={<RecordExportToolbar controls={exportControls} placeholder="搜尋合約、廠商、工種、聯絡人或電話" />}
+      emptyText={items.length ? "找不到符合條件的合約資料。" : "尚無工程合約資料，請新增第一份合約。"}
       render={(contract) => (
         <Card key={contract.id}>
           <CardContent className="flex flex-col justify-between gap-4 p-5 sm:flex-row">
@@ -3368,7 +4003,23 @@ function Contracts({ p, items, onSave, onDelete }) {
               </p>
               <AttachmentSummary attachments={contract.attachments} />
             </div>
-            <Del label={contract.name} onClick={() => onDelete(contract.id)} />
+            <div className="flex flex-wrap items-start gap-2 sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  exportControls.exportRecords([contract], {
+                    from: recordDateKey(contract),
+                    to: recordDateKey(contract),
+                  })
+                }
+              >
+                <FileDown className="mr-1 h-3.5 w-3.5" />
+                列印本筆
+              </Button>
+              <Del label={contract.name} onClick={() => onDelete(contract.id)} />
+            </div>
           </CardContent>
         </Card>
       )}
@@ -3533,12 +4184,21 @@ function Memos({ p, items, onSave, onDelete }) {
     setAdding(false);
   }
 
+  const exportControls = useRecordExport({
+    project: p,
+    title: "工項 Memo 紀錄",
+    records: items,
+    buildPrintRecord: buildMemoPrintRecord,
+  });
+
   return (
     <ListPage
       title="工項 Memo 紀錄"
       sub={`目前工地：${p.name}`}
       onAdd={() => setAdding(true)}
-      items={items}
+      items={exportControls.filteredRecords}
+      toolbar={<RecordExportToolbar controls={exportControls} placeholder="搜尋工項、標題、內容或狀態" />}
+      emptyText={items.length ? "找不到符合條件的 Memo。" : "尚無工項 Memo，請新增第一筆紀錄。"}
       render={(x) => (
         <Card key={x.id || x.title}>
           <CardContent className="flex flex-col justify-between gap-4 p-5 sm:flex-row">
@@ -3552,7 +4212,18 @@ function Memos({ p, items, onSave, onDelete }) {
               <p className="text-sm text-slate-500">{x.note}</p>
               <AttachmentSummary attachments={x.attachments} />
             </div>
-            <Del label={x.title} onClick={() => onDelete(x.id)} />
+            <div className="flex flex-wrap items-start gap-2 sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => exportControls.exportRecords([x], { from: recordDateKey(x), to: recordDateKey(x) })}
+              >
+                <FileDown className="mr-1 h-3.5 w-3.5" />
+                列印本筆
+              </Button>
+              <Del label={x.title} onClick={() => onDelete(x.id)} />
+            </div>
           </CardContent>
         </Card>
       )}
@@ -3727,6 +4398,13 @@ function Checklists({ p }) {
     );
   }
 
+  const exportControls = useRecordExport({
+    project: p,
+    title: "工地各階段檢核表",
+    records: items,
+    buildPrintRecord: buildChecklistPrintRecord,
+  });
+
   return (
     <div>
       <Header
@@ -3804,8 +4482,9 @@ function Checklists({ p }) {
           </CardContent>
         </Card>
       ) : null}
+      <RecordExportToolbar controls={exportControls} placeholder="搜尋階段名稱、檢核項目或完成狀態" />
       <div className="grid gap-4 md:grid-cols-2">
-        {items.map((s) => {
+        {exportControls.filteredRecords.map((s) => {
           const pct = s.items.length ? Math.round((s.done / s.items.length) * 100) : 0;
           const checkedItems = Array.isArray(s.checkedItems)
             ? s.checkedItems
@@ -3821,7 +4500,18 @@ function Checklists({ p }) {
                       已完成 {s.done}/{s.items.length}
                     </p>
                   </div>
-                  <Del icon label={s.stage} onClick={() => deleteItem(s.id)} />
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => exportControls.exportRecords([s])}
+                      aria-label={`列印 ${s.stage}`}
+                    >
+                      <FileDown className="h-4 w-4" />
+                    </Button>
+                    <Del icon label={s.stage} onClick={() => deleteItem(s.id)} />
+                  </div>
                 </div>
                 <div className="mt-4 h-2 rounded-full bg-slate-100">
                   <div className="h-2 rounded-full bg-slate-900" style={{ width: `${pct}%` }} />
@@ -3854,10 +4544,10 @@ function Checklists({ p }) {
             </Card>
           );
         })}
-        {!loading && !items.length ? (
+        {!loading && !exportControls.filteredRecords.length ? (
           <Card className="md:col-span-2">
             <CardContent className="p-8 text-center text-slate-500">
-              尚無階段檢核表，請新增第一份檢核表。
+              {items.length ? "找不到符合條件的檢核表。" : "尚無階段檢核表，請新增第一份檢核表。"}
             </CardContent>
           </Card>
         ) : null}
@@ -4612,7 +5302,6 @@ function Meetings({ p }) {
   const [draft, setDraft] = useState(() => createMeetingDraft(p));
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState("");
-  const [exportOpen, setExportOpen] = useState(false);
   const [exportFrom, setExportFrom] = useState("");
   const [exportTo, setExportTo] = useState("");
   const [exportIncludeAttachments, setExportIncludeAttachments] = useState(true);
@@ -4698,7 +5387,7 @@ function Meetings({ p }) {
 
   const filteredMeetings = items.filter((record) => {
     const keyword = query.trim().toLowerCase();
-    if (!keyword) return true;
+    const matchesDate = !exportFrom && !exportTo ? true : isDateInRange(record.date, exportFrom, exportTo);
     const searchable = [
       record.date,
       record.meetingType,
@@ -4720,35 +5409,27 @@ function Meetings({ p }) {
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
-    return searchable.includes(keyword);
+    const matchesKeyword = !keyword || searchable.includes(keyword);
+    return matchesKeyword && matchesDate;
   });
 
-  const exportRecords = items
-    .filter((record) => (!exportFrom && !exportTo ? true : isDateInRange(record.date, exportFrom, exportTo)))
+  const exportRecords = filteredMeetings
     .sort((a, b) => compareDateKey(a.date).localeCompare(compareDateKey(b.date)));
 
-  function openExportPanel() {
-    const dates = items
-      .map((record) => compareDateKey(record.date))
-      .filter((date) => date && date !== "未填日期")
-      .sort();
-    if (!exportFrom && dates.length) setExportFrom(dates[0]);
-    if (!exportTo && dates.length) setExportTo(dates[dates.length - 1]);
-    setExportError("");
-    setExportOpen(true);
-  }
-
-  function exportMeetingsPdf() {
-    if (!exportRecords.length) {
-      setExportError("日期區間內沒有可匯出的會議紀錄。");
+  function exportMeetingsPdf(records = exportRecords, range = {}) {
+    const recordsToExport = [...records].sort((a, b) =>
+      compareDateKey(a.date).localeCompare(compareDateKey(b.date)),
+    );
+    if (!recordsToExport.length) {
+      setExportError("目前檢索條件內沒有可匯出的會議紀錄。");
       return;
     }
 
     const opened = openMeetingRecordsPdfExport({
       project: p,
-      records: exportRecords,
-      from: exportFrom,
-      to: exportTo,
+      records: recordsToExport,
+      from: range.from ?? exportFrom,
+      to: range.to ?? exportTo,
       includeAttachments: exportIncludeAttachments,
     });
 
@@ -4772,59 +5453,10 @@ function Meetings({ p }) {
           setOpenId("");
         }}
       />
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
-        <Button type="button" variant="outline" onClick={openExportPanel}>
-          <FileDown className="mr-2 h-4 w-4" />
-          匯出 PDF
-        </Button>
-      </div>
       {error ? (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </div>
-      ) : null}
-      {exportOpen ? (
-        <Card className="mb-4">
-          <CardContent className="grid gap-4 p-5 md:grid-cols-[1fr_1fr_auto] md:items-end">
-            <label>
-              <span className="text-sm font-medium">開始日期</span>
-              <div className="mt-2">
-                <Input type="date" value={exportFrom} onChange={setExportFrom} />
-              </div>
-            </label>
-            <label>
-              <span className="text-sm font-medium">結束日期</span>
-              <div className="mt-2">
-                <Input type="date" value={exportTo} onChange={setExportTo} />
-              </div>
-            </label>
-            <label className="flex min-h-11 items-center gap-2 rounded-xl border bg-slate-50 px-3 py-2 text-sm">
-              <input
-                type="checkbox"
-                checked={exportIncludeAttachments}
-                onChange={(event) => setExportIncludeAttachments(event.target.checked)}
-              />
-              包含附件圖片
-            </label>
-            <div className="md:col-span-3 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-slate-500">匯出筆數：{exportRecords.length} 筆</p>
-              <ActionBar>
-                <Button type="button" variant="outline" onClick={() => setExportOpen(false)}>
-                  收合
-                </Button>
-                <Button type="button" onClick={exportMeetingsPdf}>
-                  <FileDown className="mr-2 h-4 w-4" />
-                  產生 PDF
-                </Button>
-              </ActionBar>
-            </div>
-            {exportError ? (
-              <div className="md:col-span-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {exportError}
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
       ) : null}
       {adding ? (
         <Card className="mb-4">
@@ -5015,22 +5647,68 @@ function Meetings({ p }) {
       ) : null}
       <Card>
         <CardContent className="p-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div className="flex flex-col gap-4">
             <div>
               <h2 className="text-lg font-bold">已儲存會議紀錄</h2>
-              <p className="mt-1 text-sm text-slate-500">可搜尋會議類型、與會人員、決議內容、負責人或備註。</p>
+              <p className="mt-1 text-sm text-slate-500">
+                可依日期區間搜尋會議類型、與會人員、決議內容、負責人或備註，並直接匯出 A4 PDF。
+              </p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_auto]">
+            <div className="grid gap-2 xl:grid-cols-[150px_150px_minmax(220px,1fr)_auto_auto] xl:items-end">
+              <label>
+                <span className="text-xs font-medium text-slate-500">開始日期</span>
+                <div className="mt-1">
+                  <Input type="date" value={exportFrom} onChange={setExportFrom} />
+                </div>
+              </label>
+              <label>
+                <span className="text-xs font-medium text-slate-500">結束日期</span>
+                <div className="mt-1">
+                  <Input type="date" value={exportTo} onChange={setExportTo} />
+                </div>
+              </label>
               <label>
                 <span className="text-xs font-medium text-slate-500">快速檢索</span>
                 <div className="mt-1">
                   <Input value={query} onChange={setQuery} ph="搜尋會議、與會人員、決議或備註" />
                 </div>
               </label>
-              <Button type="button" variant="outline" className="self-end" onClick={() => setQuery("")}>
-                清除
-              </Button>
+              <label className="flex min-h-11 items-center gap-2 rounded-xl border bg-slate-50 px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={exportIncludeAttachments}
+                  onChange={(event) => setExportIncludeAttachments(event.target.checked)}
+                />
+                包含附件
+              </label>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-none xl:grid-flow-col">
+                <Button type="button" onClick={() => exportMeetingsPdf()}>
+                  <FileDown className="mr-2 h-4 w-4" />
+                  匯出 PDF
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setQuery("");
+                    setExportFrom("");
+                    setExportTo("");
+                    setExportError("");
+                  }}
+                >
+                  清除
+                </Button>
+              </div>
             </div>
+            <div className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+              <p>目前符合：{filteredMeetings.length} 筆</p>
+              <p>匯出會依日期排序，並使用 A4 版面重新排版。</p>
+            </div>
+            {exportError ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {exportError}
+              </div>
+            ) : null}
           </div>
         </CardContent>
       </Card>
@@ -5065,10 +5743,25 @@ function Meetings({ p }) {
                       </p>
                       <AttachmentSummary attachments={record.attachments} />
                     </button>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                       <Button type="button" variant="outline" onClick={() => setOpenId(isOpen ? "" : record.id)}>
                         {isOpen ? "收合" : "查看詳情"}
                       </Button>
+                      {isOpen ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() =>
+                            exportMeetingsPdf([record], {
+                              from: compareDateKey(record.date),
+                              to: compareDateKey(record.date),
+                            })
+                          }
+                        >
+                          <FileDown className="mr-2 h-4 w-4" />
+                          列印本筆
+                        </Button>
+                      ) : null}
                       <Del icon label={`${record.date} ${record.title}`} onClick={() => deleteItem(record.id)} />
                     </div>
                   </div>
@@ -5223,6 +5916,13 @@ function Defects({ p }) {
     setAdding(false);
   }
 
+  const exportControls = useRecordExport({
+    project: p,
+    title: "缺失改善",
+    records: items,
+    buildPrintRecord: buildDefectPrintRecord,
+  });
+
   return (
     <div>
       <Header
@@ -5322,8 +6022,9 @@ function Defects({ p }) {
         </Card>
       ) : null}
 
+      <RecordExportToolbar controls={exportControls} placeholder="搜尋位置、類型、廠商、期限、狀態或嚴重程度" />
       <div className="grid gap-4">
-        {items.map((x) => (
+        {exportControls.filteredRecords.map((x) => (
           <Card key={x.id || `${x.location}-${x.type}`}>
           <CardContent className="flex flex-col justify-between gap-4 p-5 sm:flex-row">
             <div>
@@ -5338,14 +6039,25 @@ function Defects({ p }) {
               <p className="text-sm text-slate-500">改善期限：{x.due}</p>
               <AttachmentSummary attachments={x.attachments} />
             </div>
-            <Del label={`${x.location} ${x.type}`} onClick={() => deleteItem(x.id)} />
+            <div className="flex flex-wrap items-start gap-2 sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => exportControls.exportRecords([x], { from: recordDateKey(x), to: recordDateKey(x) })}
+              >
+                <FileDown className="mr-1 h-3.5 w-3.5" />
+                列印本筆
+              </Button>
+              <Del label={`${x.location} ${x.type}`} onClick={() => deleteItem(x.id)} />
+            </div>
           </CardContent>
         </Card>
         ))}
-        {!loading && !items.length ? (
+        {!loading && !exportControls.filteredRecords.length ? (
           <Card>
             <CardContent className="p-8 text-center text-slate-500">
-              尚無缺失資料，請新增第一筆紀錄。
+              {items.length ? "找不到符合條件的缺失資料。" : "尚無缺失資料，請新增第一筆紀錄。"}
             </CardContent>
           </Card>
         ) : null}
@@ -5354,12 +6066,19 @@ function Defects({ p }) {
   );
 }
 
-function ListPage({ title, sub, items, render, onAdd, btn, children }) {
+function ListPage({ title, sub, items, render, onAdd, btn, children, toolbar, emptyText = "尚無資料。" }) {
   return (
     <div>
       <Header title={title} sub={sub} btn={btn} onAdd={onAdd} />
       {children}
-      <div className="grid gap-4">{items.map(render)}</div>
+      {toolbar}
+      {items.length ? (
+        <div className="grid gap-4">{items.map(render)}</div>
+      ) : (
+        <Card>
+          <CardContent className="p-8 text-center text-slate-500">{emptyText}</CardContent>
+        </Card>
+      )}
     </div>
   );
 }
@@ -5403,13 +6122,22 @@ function Todos({ p, items, onSave, onDelete }) {
     setAdding(false);
   }
 
+  const exportControls = useRecordExport({
+    project: p,
+    title: "待辦事項",
+    records: items,
+    buildPrintRecord: buildTodoPrintRecord,
+  });
+
   return (
     <ListPage
       title="待辦事項"
       sub={`目前工地：${p.name}`}
       btn="新增待辦"
       onAdd={() => setAdding(true)}
-      items={items}
+      items={exportControls.filteredRecords}
+      toolbar={<RecordExportToolbar controls={exportControls} placeholder="搜尋待辦事項、負責人、日期、優先度或備註" />}
+      emptyText={items.length ? "找不到符合條件的待辦事項。" : "尚無待辦事項，請新增第一筆待辦。"}
       render={(todo) => (
         <Card key={todo.id}>
           <CardContent className="flex flex-col justify-between gap-4 p-5 sm:flex-row">
@@ -5424,7 +6152,20 @@ function Todos({ p, items, onSave, onDelete }) {
               {todo.note ? <p className="text-sm text-slate-500">{todo.note}</p> : null}
               <AttachmentSummary attachments={todo.attachments} />
             </div>
-            <Del label={todo.title} onClick={() => onDelete(todo.id)} />
+            <div className="flex flex-wrap items-start gap-2 sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  exportControls.exportRecords([todo], { from: recordDateKey(todo), to: recordDateKey(todo) })
+                }
+              >
+                <FileDown className="mr-1 h-3.5 w-3.5" />
+                列印本筆
+              </Button>
+              <Del label={todo.title} onClick={() => onDelete(todo.id)} />
+            </div>
           </CardContent>
         </Card>
       )}
@@ -5875,6 +6616,7 @@ function Manual() {
         "AI 判讀結果會先進入可編輯表格，確認無誤後再自行儲存。",
         "現場施工照可附掛在日報內，暫時限制每份日報最多 10 張。",
         "施工日報可依日期區間匯出 PDF，並可選擇是否包含施工照。",
+        "各表單的已儲存列表可用日期區間與關鍵字檢索，並可匯出 A4 PDF 或列印單筆資料。",
         "會議紀錄可保存工具箱、承攬商、工務與協議組織會議，並逐列記錄與會人員與決議事項。",
         "工項 Memo 用來記錄需要追蹤或與業主確認的事項。",
         "缺失改善可登錄位置、類型、負責廠商、期限與嚴重程度。",
@@ -5914,6 +6656,15 @@ function Manual() {
   const versionNotes = [
     {
       version: APP_VERSION,
+      title: "全表單 A4 匯出整合",
+      items: [
+        "廠商請款、工程合約、工項 Memo、檢核表、會議紀錄、缺失改善、待辦事項與通用表單新增檢索列匯出 PDF。",
+        "各表單支援日期區間、關鍵字與附件選項，單筆資料也可直接列印匯出。",
+        "A4 匯出版面改為更緊湊的列印配置，避免整筆資料強制不分頁造成大量空白。",
+      ],
+    },
+    {
+      version: "eztodo_26052604",
       title: "施工日報匯出與總覽累計",
       items: [
         "施工日報匯出整合到檢索列，可依日期區間與關鍵字輸出多張日報 PDF。",
@@ -6187,6 +6938,12 @@ function Placeholder({ title, p }) {
     loading,
     error,
   } = useProjectRecords(p, placeholderModuleMap[title] || `placeholder-${title}`, []);
+  const exportControls = useRecordExport({
+    project: p,
+    title,
+    records,
+    buildPrintRecord: (record) => buildPlaceholderPrintRecord(record, schema),
+  });
 
   async function saveRecord() {
     const next = {
@@ -6267,13 +7024,14 @@ function Placeholder({ title, p }) {
           </CardContent>
         </Card>
       ) : null}
+      <RecordExportToolbar controls={exportControls} placeholder={`搜尋${title}內容`} />
       <div className="grid gap-4">
         {loading ? (
           <Card>
             <CardContent className="p-8 text-center text-slate-500">讀取{title}資料中</CardContent>
           </Card>
-        ) : records.length ? (
-          records.map((record) => (
+        ) : exportControls.filteredRecords.length ? (
+          exportControls.filteredRecords.map((record) => (
             <Card key={record.id}>
               <CardContent className="flex flex-col justify-between gap-4 p-5 sm:flex-row">
                 <div>
@@ -6290,14 +7048,30 @@ function Placeholder({ title, p }) {
                   </p>
                   <AttachmentSummary attachments={record.attachments} />
                 </div>
-                <Del label={record.name} onClick={() => deleteItem(record.id)} />
+                <div className="flex flex-wrap items-start gap-2 sm:justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      exportControls.exportRecords([record], {
+                        from: recordDateKey(record),
+                        to: recordDateKey(record),
+                      })
+                    }
+                  >
+                    <FileDown className="mr-1 h-3.5 w-3.5" />
+                    列印本筆
+                  </Button>
+                  <Del label={record.name} onClick={() => deleteItem(record.id)} />
+                </div>
               </CardContent>
             </Card>
           ))
         ) : (
           <Card>
             <CardContent className="p-8 text-center text-slate-500">
-              尚無{title}資料，請點右上角新增。
+              {records.length ? `找不到符合條件的${title}資料。` : `尚無${title}資料，請點右上角新增。`}
             </CardContent>
           </Card>
         )}
