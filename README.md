@@ -143,6 +143,11 @@ APP_ORIGIN=https://your-production-domain.vercel.app
 - `DELETE /api/projects/:projectId`
 - `GET /api/projects/:projectId/records`
 - `POST /api/projects/:projectId/records`
+- `PATCH /api/projects/:projectId/records/:recordId`
 - `DELETE /api/projects/:projectId/records/:recordId`
+- `GET /api/uploads`
+- `POST /api/uploads`
 
 各分項表單建議先統一存進 `project_records`，用 `module` 區分資料來源，用 `payload` 存欄位資料，用 `attachments` 存圖片 URL metadata。
+
+`/api/uploads` 目前為預留接口，正式接圖片雲端儲存時可串接 Vercel Blob、S3 或 Cloudflare R2。施工日報 AI 判讀接口為 `/api/ai/daily-report`，未設定 `OPENAI_API_KEY` 時會回報尚未設定。

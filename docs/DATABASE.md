@@ -107,6 +107,11 @@
 | 待辦事項 | `todos` |
 | 照片中心 | `photos` |
 | 重要公告 | `announcements` |
+| 操作紀錄 | `operationLogs` |
+
+`operationLogs` 由系統自動寫入，不建議開放使用者手動新增。新增、編輯、刪除表單資料時，payload 會保存 `action`、`targetModule`、`targetTitle`、`message`、`createdAt` 等欄位，供日後稽核追蹤。
+
+圖片上傳接口已先預留 `/api/uploads`，正式上線可接 Vercel Blob、S3 或 Cloudflare R2；施工日報 AI 判讀接口為 `/api/ai/daily-report`。
 
 ## 通用紀錄 payload 範例
 

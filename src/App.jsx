@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
+  Bell,
   Building2,
   CalendarDays,
   Camera,
@@ -10,6 +11,7 @@ import {
   ClipboardList,
   FileDown,
   FileText,
+  History,
   ListChecks,
   Loader2,
   LogIn,
@@ -80,6 +82,8 @@ function ActionBar({ children, className = "" }) {
 const I = {
   dashboard: Building2,
   manual: FileText,
+  notifications: Bell,
+  operationLogs: History,
   projects: Megaphone,
   contracts: FileText,
   claims: WalletCards,
@@ -97,6 +101,7 @@ const I = {
 const mods = [
   ["dashboard", "總覽"],
   ["manual", "操作手冊"],
+  ["operationLogs", "操作紀錄"],
   ["projects", "重要公告"],
   ["contracts", "工程合約"],
   ["claims", "廠商請款"],
@@ -111,7 +116,7 @@ const mods = [
   ["photos", "照片中心"],
 ].map(([id, label]) => ({ id, label, icon: I[id] }));
 
-const APP_VERSION = "eztodo_26052607";
+const APP_VERSION = "eztodo_26052701";
 const SAMPLE_PROJECT_NAME = "範例工地：東區住宅新建工程";
 const DAILY_AI_SOURCE_MAX_BYTES = 3 * 1024 * 1024;
 
@@ -741,6 +746,191 @@ function seedItemsForProject(seedItems = [], project) {
     }));
 }
 
+const operationLogModule = "operationLogs";
+
+function projectStorageKey(project) {
+  return project?.id || project?.name || "project";
+}
+
+function moduleLabel(moduleId) {
+  return mods.find((item) => item.id === moduleId)?.label || moduleId || "資料";
+}
+
+function recordDisplayTitle(item = {}, options = {}) {
+  return (
+    options.title ||
+    item.title ||
+    item.name ||
+    item.stage ||
+    item.location ||
+    (item.vendor && item.period ? `${item.vendor} ${item.period}` : "") ||
+    item.date ||
+    "未命名資料"
+  );
+}
+
+function operationActionLabel(action) {
+  return {
+    create: "新增",
+    update: "編輯",
+    delete: "刪除",
+  }[action] || action;
+}
+
+function dispatchRecordCreated(project, module, record) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("eztodo:record-created", {
+      detail: {
+        projectKey: projectStorageKey(project),
+        module,
+        record,
+      },
+    }),
+  );
+}
+
+async function appendOperationLog(project, entry) {
+  if (!project?.id && !project?.name) return null;
+  const log = {
+    id: `operation-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    date: todayKey(),
+    createdAt: new Date().toISOString(),
+    projectId: project?.id,
+    projectName: project?.name,
+    status: entry.action || "operation",
+    ...entry,
+  };
+
+  if (useLocalPreview) {
+    const key = localRecordsKey(project, operationLogModule);
+    let current = [];
+    try {
+      current = JSON.parse(window.localStorage.getItem(key) || "[]");
+    } catch {
+      current = [];
+    }
+    const next = [log, ...current].slice(0, 300);
+    window.localStorage.setItem(key, JSON.stringify(next));
+    dispatchRecordCreated(project, operationLogModule, log);
+    return log;
+  }
+
+  const data = await apiFetch(`/api/projects/${encodeURIComponent(project.id)}/records`, {
+    method: "POST",
+    body: JSON.stringify({
+      module: operationLogModule,
+      title: log.message || `${operationActionLabel(log.action)} ${log.targetTitle || ""}`.trim(),
+      status: log.action || "operation",
+      payload: serializeRecordPayload(log),
+      attachments: [],
+    }),
+  });
+  const saved = itemFromRecord(data.record);
+  dispatchRecordCreated(project, operationLogModule, saved);
+  return saved;
+}
+
+function isClosedStatus(status = "") {
+  return ["已完成", "已結案", "結案", "完成"].includes(status);
+}
+
+function dateWithinDays(value, days = 7) {
+  const date = parseDate(compareDateKey(value));
+  if (!date) return false;
+  const today = parseDate(todayKey());
+  const end = addDays(today, days);
+  return date >= today && date <= end;
+}
+
+function isOverdue(value) {
+  const date = parseDate(compareDateKey(value));
+  const today = parseDate(todayKey());
+  return Boolean(date && today && date < today);
+}
+
+function buildProjectNotifications({ announcements = [], defects = [], meetings = [], todos = [], memos = [] }) {
+  const notices = [];
+
+  announcements
+    .filter((item) => ["重要", "緊急"].includes(item.status) || item.status === "公告")
+    .slice(0, 5)
+    .forEach((item) => {
+      notices.push({
+        id: `announcement-${item.id}`,
+        type: "公告",
+        tone: item.status === "緊急" ? "danger" : "warning",
+        title: item.name || item.title || "重要公告",
+        desc: item.note || "請查看公告內容。",
+        date: item.createdAt || item.date || "",
+        module: "projects",
+      });
+    });
+
+  defects
+    .filter((item) => !isClosedStatus(item.status) && (isOverdue(item.due) || dateWithinDays(item.due, 7)))
+    .forEach((item) => {
+      notices.push({
+        id: `defect-${item.id}`,
+        type: "缺失",
+        tone: isOverdue(item.due) ? "danger" : "warning",
+        title: `${item.location || "未填位置"} ${isOverdue(item.due) ? "已逾期" : "即將到期"}`,
+        desc: `${item.type || "缺失"}｜負責：${item.vendor || "未指定"}｜期限：${item.due || "未設定"}`,
+        date: item.due,
+        module: "defects",
+      });
+    });
+
+  meetings
+    .filter((item) => dateWithinDays(item.date, 7))
+    .forEach((item) => {
+      notices.push({
+        id: `meeting-${item.id}`,
+        type: "會議",
+        tone: "info",
+        title: item.title || item.meetingType || "近期會議",
+        desc: `${item.date || "未設定日期"}｜${item.location || "未填地點"}｜記錄：${item.recorder || "未填寫"}`,
+        date: item.date,
+        module: "meetings",
+      });
+    });
+
+  todos
+    .filter((item) => !isClosedStatus(item.status) && (isOverdue(item.date) || dateWithinDays(item.date, 7)))
+    .forEach((item) => {
+      notices.push({
+        id: `todo-${item.id}`,
+        type: "待辦",
+        tone: isOverdue(item.date) ? "danger" : "info",
+        title: item.title || item.name || "近期待辦事項",
+        desc: `${item.owner || "未指定"}｜${item.date || "未設定日期"}｜${item.note || "無備註"}`,
+        date: item.date,
+        module: "todos",
+      });
+    });
+
+  memos
+    .filter((item) => !isClosedStatus(item.status) && dateWithinDays(item.date, 7))
+    .forEach((item) => {
+      notices.push({
+        id: `memo-${item.id}`,
+        type: "Memo",
+        tone: "info",
+        title: item.title || "近期工項 Memo",
+        desc: `${item.trade || "未分類"}｜${item.date || "未設定日期"}｜${item.status || "未設定狀態"}`,
+        date: item.date,
+        module: "memos",
+      });
+    });
+
+  return notices.sort((a, b) => {
+    const toneWeight = { danger: 0, warning: 1, info: 2 };
+    const toneCompare = (toneWeight[a.tone] ?? 3) - (toneWeight[b.tone] ?? 3);
+    if (toneCompare !== 0) return toneCompare;
+    return compareDateKey(a.date, "9999-12-31").localeCompare(compareDateKey(b.date, "9999-12-31"));
+  });
+}
+
 function projectModuleRestriction(project, module) {
   if (!project) return "";
   if (module === "claims" && project.canViewClaims === false) {
@@ -819,6 +1009,25 @@ function useProjectRecords(project, module, seedItems = []) {
     };
   }, [project?.id, project?.name, project?.canViewClaims, project?.canViewContracts, module]);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || (!project?.id && !project?.name)) return undefined;
+
+    function handleRecordCreated(event) {
+      const detail = event.detail || {};
+      if (detail.projectKey !== projectStorageKey(project) || detail.module !== module || !detail.record) {
+        return;
+      }
+      setItems((current) =>
+        current.some((item) => item.id === detail.record.id || item.recordId === detail.record.id)
+          ? current
+          : [detail.record, ...current],
+      );
+    }
+
+    window.addEventListener("eztodo:record-created", handleRecordCreated);
+    return () => window.removeEventListener("eztodo:record-created", handleRecordCreated);
+  }, [project?.id, project?.name, module]);
+
   function writeLocal(nextItems) {
     if (!useLocalPreview || (!project?.id && !project?.name)) return;
     window.localStorage.setItem(localRecordsKey(project, module), JSON.stringify(nextItems));
@@ -847,6 +1056,16 @@ function useProjectRecords(project, module, seedItems = []) {
         writeLocal(nextItems);
         return nextItems;
       });
+      if (module !== operationLogModule) {
+        await appendOperationLog(project, {
+          action: "create",
+          targetModule: module,
+          targetModuleLabel: moduleLabel(module),
+          targetId: nextLocal.id,
+          targetTitle: recordDisplayTitle(nextLocal, options),
+          message: `新增「${recordDisplayTitle(nextLocal, options)}」至${moduleLabel(module)}`,
+        }).catch(() => null);
+      }
       return nextLocal;
     }
 
@@ -869,6 +1088,16 @@ function useProjectRecords(project, module, seedItems = []) {
     });
     const saved = itemFromRecord(data.record);
     setItems((current) => [saved, ...current]);
+    if (module !== operationLogModule) {
+      await appendOperationLog(project, {
+        action: "create",
+        targetModule: module,
+        targetModuleLabel: moduleLabel(module),
+        targetId: saved.id,
+        targetTitle: recordDisplayTitle(saved, options),
+        message: `新增「${recordDisplayTitle(saved, options)}」至${moduleLabel(module)}`,
+      }).catch(() => null);
+    }
     return saved;
   }
 
@@ -879,18 +1108,42 @@ function useProjectRecords(project, module, seedItems = []) {
       throw new Error(restrictedMessage);
     }
 
+    const targetItem = items.find((item) => item.id === id || item.recordId === id);
+    const targetTitle = recordDisplayTitle(targetItem);
     const previous = items;
     const nextItems = items.filter((item) => item.id !== id && item.recordId !== id);
     setItems(nextItems);
     writeLocal(nextItems);
 
-    if (useLocalPreview) return;
+    if (useLocalPreview) {
+      if (module !== operationLogModule) {
+        await appendOperationLog(project, {
+          action: "delete",
+          targetModule: module,
+          targetModuleLabel: moduleLabel(module),
+          targetId: id,
+          targetTitle,
+          message: `刪除${moduleLabel(module)}「${targetTitle}」`,
+        }).catch(() => null);
+      }
+      return;
+    }
 
     try {
       await apiFetch(
         `/api/projects/${encodeURIComponent(project.id)}/records/${encodeURIComponent(id)}`,
         { method: "DELETE" },
       );
+      if (module !== operationLogModule) {
+        await appendOperationLog(project, {
+          action: "delete",
+          targetModule: module,
+          targetModuleLabel: moduleLabel(module),
+          targetId: id,
+          targetTitle,
+          message: `刪除${moduleLabel(module)}「${targetTitle}」`,
+        }).catch(() => null);
+      }
     } catch (err) {
       setItems(previous);
       setError(err.message);
@@ -915,13 +1168,28 @@ function useProjectRecords(project, module, seedItems = []) {
       projectName: project?.name,
     };
     const previous = items;
+    const previousItem = items.find((item) => item.id === id || item.recordId === id);
+    const previousTitle = recordDisplayTitle(previousItem);
     const nextItems = items.map((item) =>
       item.id === id || item.recordId === id ? normalized : item,
     );
     setItems(nextItems);
     writeLocal(nextItems);
 
-    if (useLocalPreview) return normalized;
+    if (useLocalPreview) {
+      if (module !== operationLogModule) {
+        await appendOperationLog(project, {
+          action: "update",
+          targetModule: module,
+          targetModuleLabel: moduleLabel(module),
+          targetId: id,
+          targetTitle: recordDisplayTitle(normalized, options),
+          previousTitle,
+          message: `編輯${moduleLabel(module)}「${recordDisplayTitle(normalized, options)}」`,
+        }).catch(() => null);
+      }
+      return normalized;
+    }
 
     try {
       const data = await apiFetch(
@@ -947,6 +1215,17 @@ function useProjectRecords(project, module, seedItems = []) {
       setItems((current) =>
         current.map((item) => (item.id === id || item.recordId === id ? saved : item)),
       );
+      if (module !== operationLogModule) {
+        await appendOperationLog(project, {
+          action: "update",
+          targetModule: module,
+          targetModuleLabel: moduleLabel(module),
+          targetId: saved.id,
+          targetTitle: recordDisplayTitle(saved, options),
+          previousTitle,
+          message: `編輯${moduleLabel(module)}「${recordDisplayTitle(saved, options)}」`,
+        }).catch(() => null);
+      }
       return saved;
     } catch (err) {
       setItems(previous);
@@ -2519,6 +2798,22 @@ function buildPlaceholderPrintRecord(record, schema) {
     fields: schema.fields.map((field) => [field.label, record[field.key]]),
     note: record.note,
     attachments: record.attachments,
+  };
+}
+
+function buildOperationLogPrintRecord(record) {
+  return {
+    title: record.message || `${operationActionLabel(record.action)} ${record.targetTitle || ""}`.trim(),
+    subtitle: `${record.targetModuleLabel || moduleLabel(record.targetModule)}｜${formatDateTime(record.createdAt)}`,
+    status: operationActionLabel(record.action),
+    fields: [
+      ["操作", operationActionLabel(record.action)],
+      ["模組", record.targetModuleLabel || moduleLabel(record.targetModule)],
+      ["目標資料", record.targetTitle],
+      ["操作時間", formatDateTime(record.createdAt)],
+      ["日期", record.date],
+    ],
+    note: record.message,
   };
 }
 
@@ -6865,8 +7160,16 @@ function Rows({ title, list, add, del: remove, render }) {
   );
 }
 
-function Defects({ p }) {
-  const { items, saveItem, updateItem, deleteItem, loading, error } = useProjectRecords(p, "defects", defectSeed);
+function Defects({ p, recordsApi }) {
+  const localRecordsApi = useProjectRecords(p, "defects", defectSeed);
+  const {
+    items,
+    saveItem,
+    updateItem,
+    deleteItem,
+    loading,
+    error,
+  } = recordsApi || localRecordsApi;
   const [adding, setAdding] = useState(false);
   const [formError, setFormError] = useState("");
   const emptyDraft = {
@@ -7111,6 +7414,160 @@ function ModuleRestricted({ title, message }) {
         <p className="mt-2 text-sm">{message}</p>
       </CardContent>
     </Card>
+  );
+}
+
+function NotificationCenter({ notifications, open, onOpenChange, onNavigate }) {
+  const hasNotifications = notifications.length > 0;
+  const preview = notifications.slice(0, 8);
+
+  return (
+    <div className="relative">
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        onClick={() => onOpenChange(!open)}
+        className="relative bg-white"
+        aria-label="站內通知"
+      >
+        <Bell className="h-4 w-4" />
+        {hasNotifications ? (
+          <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />
+        ) : null}
+      </Button>
+
+      {open ? (
+        <div className="absolute right-0 z-30 mt-2 w-[min(92vw,380px)] overflow-hidden rounded-2xl border bg-white shadow-xl">
+          <div className="border-b bg-slate-50 px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-bold">站內通知</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  公告、缺失期限、會議與待辦會在這裡彙整。
+                </p>
+              </div>
+              {hasNotifications ? <Badge>{notifications.length}</Badge> : null}
+            </div>
+          </div>
+          <div className="max-h-[60vh] overflow-auto p-3">
+            {preview.length ? (
+              <div className="grid gap-2">
+                {preview.map((notice) => (
+                  <button
+                    key={notice.id}
+                    type="button"
+                    onClick={() => {
+                      onNavigate(notice.module);
+                      onOpenChange(false);
+                    }}
+                    className="w-full rounded-xl border p-3 text-left transition hover:bg-slate-50"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge>{notice.type}</Badge>
+                          <span
+                            className={`h-2 w-2 rounded-full ${
+                              notice.tone === "danger"
+                                ? "bg-red-500"
+                                : notice.tone === "warning"
+                                  ? "bg-amber-500"
+                                  : "bg-sky-500"
+                            }`}
+                          />
+                        </div>
+                        <p className="mt-2 break-words font-bold text-slate-900">{notice.title}</p>
+                        <p className="mt-1 line-clamp-2 text-sm text-slate-500">{notice.desc}</p>
+                      </div>
+                      <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-slate-400" />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed p-6 text-center text-sm text-slate-500">
+                目前沒有需要提醒的事項。
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function OperationLogs({ p, records, loading, error }) {
+  const exportControls = useRecordExport({
+    project: p,
+    title: "操作紀錄",
+    records,
+    buildPrintRecord: buildOperationLogPrintRecord,
+  });
+  const actionClass = {
+    create: "bg-emerald-50 text-emerald-700",
+    update: "bg-amber-50 text-amber-700",
+    delete: "bg-red-50 text-red-700",
+  };
+
+  return (
+    <div>
+      <Header
+        title="操作紀錄"
+        sub={`目前工地：${p.name}，自動記錄新增、編輯與刪除等重要操作`}
+      />
+      {error ? (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      ) : null}
+      <RecordExportToolbar controls={exportControls} placeholder="搜尋操作、模組、資料名稱或日期" />
+      {loading ? (
+        <Card>
+          <CardContent className="p-8 text-center text-slate-500">讀取操作紀錄中</CardContent>
+        </Card>
+      ) : exportControls.filteredRecords.length ? (
+        <div className="grid gap-3">
+          {exportControls.filteredRecords.map((record) => (
+            <Card key={record.id}>
+              <CardContent className="p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${
+                          actionClass[record.action] || "bg-slate-100 text-slate-700"
+                        }`}
+                      >
+                        {operationActionLabel(record.action)}
+                      </span>
+                      <Badge>{record.targetModuleLabel || moduleLabel(record.targetModule)}</Badge>
+                    </div>
+                    <h3 className="mt-3 break-words font-bold">{record.message || record.targetTitle}</h3>
+                    <p className="mt-1 break-words text-sm text-slate-500">
+                      目標資料：{record.targetTitle || "未命名資料"}
+                    </p>
+                    {record.previousTitle && record.previousTitle !== record.targetTitle ? (
+                      <p className="text-sm text-slate-500">原資料名稱：{record.previousTitle}</p>
+                    ) : null}
+                  </div>
+                  <div className="shrink-0 text-left text-xs text-slate-500 sm:text-right">
+                    <p>{formatDateTime(record.createdAt)}</p>
+                    <p className="mt-1">紀錄日期：{record.date || "未設定"}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <Card>
+          <CardContent className="p-8 text-center text-slate-500">
+            尚無操作紀錄；新增、編輯或刪除資料後會自動建立。
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }
 
@@ -7685,6 +8142,8 @@ function Manual() {
         "現場施工照可附掛在日報內，暫時限制每份日報最多 10 張。",
         "施工日報可依日期區間匯出 PDF，並可選擇是否包含施工照。",
         "各表單的已儲存列表可用日期區間與關鍵字檢索，並可匯出 A4 PDF 或列印單筆資料。",
+        "站內通知會彙整重要公告、即將到期缺失、近期會議與近期待辦事項。",
+        "操作紀錄會自動保留新增、編輯與刪除等重要動作，方便日後追蹤。",
         "會議紀錄可保存工具箱、承攬商、工務與協議組織會議，並逐列記錄與會人員與決議事項。",
         "工項 Memo 用來記錄需要追蹤或與業主確認的事項。",
         "缺失改善可登錄位置、類型、負責廠商、期限與嚴重程度。",
@@ -7724,6 +8183,15 @@ function Manual() {
   const versionNotes = [
     {
       version: APP_VERSION,
+      title: "站內通知與操作紀錄",
+      items: [
+        "左側功能列表新增操作紀錄，系統會自動記錄各表單新增、編輯與刪除等重要操作。",
+        "登入後右上角新增站內通知按鈕，若有重要公告、缺失期限、近期會議或待辦事項會顯示紅點。",
+        "圖片上傳接口先預留 /api/uploads，後續可接 Vercel Blob、S3 或 Cloudflare R2。",
+      ],
+    },
+    {
+      version: "eztodo_26052607",
       title: "表單編輯與文件閱覽權限",
       items: [
         "各主要表單的已儲存資料新增編輯按鈕，可直接回填原表單更新內容。",
@@ -7942,7 +8410,7 @@ const placeholderModuleMap = {
   照片中心: "photos",
 };
 
-function Placeholder({ title, p }) {
+function Placeholder({ title, p, recordsApi }) {
   const schema =
     {
       重要公告: {
@@ -8018,6 +8486,7 @@ function Placeholder({ title, p }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState(emptyDraft);
   const [editingId, setEditingId] = useState("");
+  const internalRecordsApi = useProjectRecords(p, placeholderModuleMap[title] || `placeholder-${title}`, []);
   const {
     items: records,
     saveItem,
@@ -8025,7 +8494,7 @@ function Placeholder({ title, p }) {
     deleteItem,
     loading,
     error,
-  } = useProjectRecords(p, placeholderModuleMap[title] || `placeholder-${title}`, []);
+  } = recordsApi || internalRecordsApi;
   const exportControls = useRecordExport({
     project: p,
     title,
@@ -9059,7 +9528,9 @@ export default function App() {
   const [p, setP] = useState(null);
   const [moduleListOpen, setModuleListOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [loginTransitionUser, setLoginTransitionUser] = useState(null);
+  const announcementRecords = useProjectRecords(p, "announcements", []);
   const claimRecords = useProjectRecords(p, "claims", claimSeed);
   const contractRecords = useProjectRecords(p, "contracts", contractSeed);
   const memoRecords = useProjectRecords(p, "memos", memos);
@@ -9067,6 +9538,8 @@ export default function App() {
   const meetingRecords = useProjectRecords(p, "meetings", []);
   const todoRecords = useProjectRecords(p, "todos", todoSeed);
   const dailyRecords = useProjectRecords(p, "daily", []);
+  const defectRecords = useProjectRecords(p, "defects", defectSeed);
+  const operationRecords = useProjectRecords(p, operationLogModule, []);
 
   useEffect(() => {
     if (useLocalPreview) return;
@@ -9095,6 +9568,7 @@ export default function App() {
       setActive("dashboard");
       setModuleListOpen(false);
       setAdminOpen(false);
+      setNotificationsOpen(false);
       return;
     }
 
@@ -9103,6 +9577,7 @@ export default function App() {
     setActive("dashboard");
     setModuleListOpen(false);
     setAdminOpen(false);
+    setNotificationsOpen(false);
     setLoginTransitionUser(null);
     setAuth({ loading: false, user: null });
   }
@@ -9118,8 +9593,27 @@ export default function App() {
     setP(null);
     setModuleListOpen(false);
     setAdminOpen(false);
+    setNotificationsOpen(false);
     setLoginTransitionUser(null);
   }
+
+  const projectNotifications = useMemo(
+    () =>
+      buildProjectNotifications({
+        announcements: announcementRecords.items,
+        defects: defectRecords.items,
+        meetings: meetingRecords.items,
+        todos: todoRecords.items,
+        memos: memoRecords.items,
+      }),
+    [
+      announcementRecords.items,
+      defectRecords.items,
+      meetingRecords.items,
+      todoRecords.items,
+      memoRecords.items,
+    ],
+  );
 
   const page = useMemo(() => {
     if (!p) return null;
@@ -9136,6 +9630,19 @@ export default function App() {
     const projectDailyReports = dailyRecords.items;
 
     if (active === "manual") return <Manual />;
+    if (active === "operationLogs") {
+      return (
+        <OperationLogs
+          p={p}
+          records={operationRecords.items}
+          loading={operationRecords.loading}
+          error={operationRecords.error}
+        />
+      );
+    }
+    if (active === "projects") {
+      return <Placeholder p={p} title="重要公告" recordsApi={announcementRecords} />;
+    }
     if (active === "dashboard") {
       return (
         <Dashboard
@@ -9196,7 +9703,7 @@ export default function App() {
     }
     if (active === "meetings") return <Meetings p={p} items={projectMeetingItems} />;
     if (active === "daily") return <Daily p={p} records={dailyRecords} />;
-    if (active === "defects") return <Defects p={p} />;
+    if (active === "defects") return <Defects p={p} recordsApi={defectRecords} />;
     if (active === "todos") {
       return (
         <Todos
@@ -9212,9 +9719,18 @@ export default function App() {
   }, [
     active,
     p,
+    announcementRecords.items,
+    announcementRecords.loading,
+    announcementRecords.error,
     claimRecords.items,
     contractRecords.items,
+    defectRecords.items,
+    defectRecords.loading,
+    defectRecords.error,
     memoRecords.items,
+    operationRecords.items,
+    operationRecords.loading,
+    operationRecords.error,
     scheduleRecords.items,
     meetingRecords.items,
     todoRecords.items,
@@ -9402,6 +9918,19 @@ export default function App() {
           </Card>
         </aside>
         <main className="min-w-0 flex-1">
+          <div className="mb-4 flex justify-end">
+            <NotificationCenter
+              notifications={projectNotifications}
+              open={notificationsOpen}
+              onOpenChange={setNotificationsOpen}
+              onNavigate={(moduleId) => {
+                if (canUseProjectModule(p, moduleId)) {
+                  setActive(moduleId);
+                  setModuleListOpen(false);
+                }
+              }}
+            />
+          </div>
           <motion.div
             key={`${p.name}-${active}`}
             initial={{ opacity: 0, y: 8 }}
