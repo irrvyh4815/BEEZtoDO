@@ -98,6 +98,7 @@
 | 工項 Memo | `memos` |
 | 階段檢核表 | `checklists` |
 | 預定進度 | `schedule` |
+| 會議紀錄 | `meetings` |
 | 施工日報 | `daily` |
 | 缺失改善 | `defects` |
 | 材料庫存 | `materials` |
@@ -216,6 +217,46 @@
 ```
 
 紙本日報 AI 判讀建議先呼叫 `POST /api/ai/daily-report` 取得結構化結果，再讓使用者確認欄位內容，最後才用 `project_records` 寫入正式施工日報。目前紙本日報圖片先限制 3MB 以下，現場施工照暫時限制每份日報最多 10 張；正式接 Vercel Blob 後，Postgres 只保存檔案 metadata 與 URL。
+
+### 會議紀錄
+
+```json
+{
+  "module": "meetings",
+  "title": "2026-05-26 第 5 次承攬商會議",
+  "status": "承攬商會議",
+  "payload": {
+    "meetingType": "承攬商會議",
+    "title": "第 5 次承攬商會議",
+    "date": "2026-05-26",
+    "location": "工務所會議室",
+    "chair": "王主任",
+    "recorder": "李工程師",
+    "attendees": [
+      {
+        "name": "陳先生",
+        "company": "宏鑫水電",
+        "role": "承攬商窗口",
+        "note": ""
+      }
+    ],
+    "items": [
+      {
+        "topic": "2F 管線協調",
+        "content": "確認管線路徑與封板時程。",
+        "decision": "5/30 前完成套管確認。",
+        "owner": "宏鑫水電",
+        "dueDate": "2026-05-30",
+        "note": ""
+      }
+    ],
+    "note": "下次會議追蹤 2F 施工進度。"
+  },
+  "attachments": []
+}
+```
+
+會議紀錄目前支援工具箱會議、承攬商會議、工務會議與協議組織會議。前端可依日期區間產生 PDF 匯出，並可選擇是否包含附件圖片。
 
 ### 預定進度
 

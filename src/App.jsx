@@ -8,6 +8,7 @@ import {
   CheckSquare,
   ChevronRight,
   ClipboardList,
+  FileDown,
   FileText,
   ListChecks,
   Loader2,
@@ -24,6 +25,7 @@ import {
   StickyNote,
   Trash2,
   UserRound,
+  UsersRound,
   WalletCards,
 } from "lucide-react";
 
@@ -83,6 +85,7 @@ const I = {
   memos: StickyNote,
   checklists: ListChecks,
   schedule: CalendarDays,
+  meetings: UsersRound,
   daily: ClipboardList,
   defects: AlertTriangle,
   materials: Package,
@@ -99,6 +102,7 @@ const mods = [
   ["memos", "工項 Memo"],
   ["checklists", "階段檢核表"],
   ["schedule", "預定進度"],
+  ["meetings", "會議紀錄"],
   ["daily", "施工日報"],
   ["defects", "缺失改善"],
   ["materials", "材料庫存"],
@@ -106,12 +110,13 @@ const mods = [
   ["photos", "照片中心"],
 ].map(([id, label]) => ({ id, label, icon: I[id] }));
 
-const APP_VERSION = "eztodo_26052506";
+const APP_VERSION = "eztodo_26052602";
 const SAMPLE_PROJECT_NAME = "範例工地：東區住宅新建工程";
 const DAILY_AI_SOURCE_MAX_BYTES = 3 * 1024 * 1024;
 
 const projectStatusOptions = ["籌備中", "進行中", "收尾中", "暫停", "結案"];
 const organizationOptions = ["測試分組1", "測試分組2", "測試分組3"];
+const meetingTypeOptions = ["工具箱會議", "承攬商會議", "工務會議", "協議組織會議"];
 const memberNumberPrefix = "26";
 const projectJobTitleOptions = [
   "工地主任",
@@ -496,6 +501,18 @@ function toDateKey(date) {
 
 function todayKey() {
   return toDateKey(new Date());
+}
+
+function compareDateKey(value, fallback = "") {
+  return String(value || fallback || "").slice(0, 10);
+}
+
+function isDateInRange(value, from, to) {
+  const key = compareDateKey(value);
+  if (!key || key === "未填日期") return false;
+  if (from && key < from) return false;
+  if (to && key > to) return false;
+  return true;
 }
 
 function addDays(date, amount) {
@@ -1002,6 +1019,510 @@ function AttachmentSummary({ attachments = [] }) {
       ))}
     </div>
   );
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function dailyReportRowsHtml(rows = [], columns = []) {
+  if (!rows.length) return `<p class="empty">尚無資料</p>`;
+
+  return `
+    <table>
+      <thead>
+        <tr>${columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join("")}</tr>
+      </thead>
+      <tbody>
+        ${rows
+          .map(
+            (row) => `
+              <tr>
+                ${columns
+                  .map(([key]) => `<td>${escapeHtml(row[key] || "未填寫")}</td>`)
+                  .join("")}
+              </tr>
+            `,
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function attachmentPrintHtml(attachments = []) {
+  if (!attachments?.length) return `<p class="empty">未附加照片</p>`;
+
+  return `
+    <div class="photos">
+      ${attachments
+        .map(
+          (image) => `
+            <figure>
+              ${image.url ? `<img src="${escapeHtml(image.url)}" alt="${escapeHtml(image.name)}" />` : ""}
+              <figcaption>${escapeHtml(image.name || "未命名圖片")}</figcaption>
+            </figure>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function dailyReportsPrintHtml({ project, reports, from, to, includePhotos }) {
+  const totalWorkers = reports.reduce((total, report) => total + Number(report.workers || 0), 0);
+  const generatedAt = new Intl.DateTimeFormat("zh-TW", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+
+  return `<!doctype html>
+    <html lang="zh-Hant">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(project.name)} 施工日報匯出</title>
+        <style>
+          @page { size: A4; margin: 14mm; }
+          * { box-sizing: border-box; }
+          body {
+            color: #0f172a;
+            font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
+            margin: 0;
+            line-height: 1.55;
+          }
+          h1, h2, h3, p { margin: 0; }
+          .cover {
+            border-bottom: 3px solid #0f172a;
+            margin-bottom: 18px;
+            padding-bottom: 14px;
+          }
+          .eyebrow { color: #64748b; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+          h1 { font-size: 26px; margin-top: 6px; }
+          .meta {
+            display: grid;
+            gap: 8px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            margin-top: 14px;
+          }
+          .meta div, .summary div {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 9px 10px;
+          }
+          .label { color: #64748b; display: block; font-size: 11px; }
+          .value { display: block; font-size: 14px; font-weight: 700; margin-top: 2px; }
+          .summary {
+            display: grid;
+            gap: 8px;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            margin: 14px 0 20px;
+          }
+          .report {
+            break-inside: avoid;
+            border: 1px solid #cbd5e1;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            overflow: hidden;
+          }
+          .report-header {
+            background: #0f172a;
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 14px;
+          }
+          .report-body { padding: 12px 14px; }
+          .section { margin-top: 12px; }
+          .section h3 { font-size: 15px; margin-bottom: 6px; }
+          table {
+            border-collapse: collapse;
+            font-size: 12px;
+            width: 100%;
+          }
+          th, td {
+            border: 1px solid #e2e8f0;
+            padding: 7px 8px;
+            text-align: left;
+            vertical-align: top;
+          }
+          th { background: #f8fafc; color: #475569; }
+          .note {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 12px;
+            min-height: 36px;
+            padding: 9px 10px;
+            white-space: pre-wrap;
+          }
+          .empty { color: #64748b; font-size: 12px; }
+          .photos {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+          figure {
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            margin: 0;
+            overflow: hidden;
+            padding: 6px;
+          }
+          figure img {
+            aspect-ratio: 4 / 3;
+            display: block;
+            object-fit: cover;
+            width: 100%;
+          }
+          figcaption {
+            color: #475569;
+            font-size: 11px;
+            margin-top: 5px;
+            word-break: break-word;
+          }
+          .no-print { margin-top: 18px; }
+          .no-print button {
+            background: #0f172a;
+            border: 0;
+            border-radius: 10px;
+            color: white;
+            cursor: pointer;
+            font: inherit;
+            padding: 10px 14px;
+          }
+          @media print {
+            .no-print { display: none; }
+            .report { page-break-inside: avoid; }
+          }
+        </style>
+      </head>
+      <body>
+        <section class="cover">
+          <p class="eyebrow">EZtoDO工程管理程式｜施工日報 PDF 匯出</p>
+          <h1>${escapeHtml(project.name)} 施工日報彙整</h1>
+          <div class="meta">
+            <div><span class="label">工地地址</span><span class="value">${escapeHtml(project.address || "未填寫")}</span></div>
+            <div><span class="label">日期區間</span><span class="value">${escapeHtml(from || "不限")} 至 ${escapeHtml(to || "不限")}</span></div>
+            <div><span class="label">匯出時間</span><span class="value">${escapeHtml(generatedAt)}</span></div>
+            <div><span class="label">照片附件</span><span class="value">${includePhotos ? "包含" : "不包含"}</span></div>
+          </div>
+        </section>
+        <section class="summary">
+          <div><span class="label">日報筆數</span><span class="value">${reports.length}</span></div>
+          <div><span class="label">累計出工人數</span><span class="value">${totalWorkers}</span></div>
+          <div><span class="label">匯出版本</span><span class="value">${escapeHtml(APP_VERSION)}</span></div>
+        </section>
+        ${reports
+          .map(
+            (report) => `
+              <article class="report">
+                <header class="report-header">
+                  <div>
+                    <h2>${escapeHtml(report.date)} 施工日報</h2>
+                    <p>天氣：${escapeHtml(report.weather || "未選擇")}｜總人數：${escapeHtml(report.workers || 0)}</p>
+                  </div>
+                  <p>${escapeHtml(report.weatherNote || "")}</p>
+                </header>
+                <div class="report-body">
+                  <section class="section">
+                    <h3>施工工班</h3>
+                    ${dailyReportRowsHtml(report.work || [], [
+                      ["trade", "工班"],
+                      ["workers", "人數"],
+                      ["description", "施工項目"],
+                      ["note", "備註"],
+                    ])}
+                  </section>
+                  <section class="section">
+                    <h3>材料使用 / 進場</h3>
+                    ${dailyReportRowsHtml(report.materials || [], [
+                      ["name", "材料"],
+                      ["spec", "規格"],
+                      ["quantity", "數量"],
+                      ["unit", "單位"],
+                      ["note", "備註"],
+                    ])}
+                  </section>
+                  <section class="section">
+                    <h3>機具使用</h3>
+                    ${dailyReportRowsHtml(report.equipment || [], [
+                      ["name", "機具"],
+                      ["quantity", "數量"],
+                      ["note", "備註"],
+                    ])}
+                  </section>
+                  <section class="section">
+                    <h3>其他備註 / 記事</h3>
+                    <div class="note">${escapeHtml(report.dailyNote || report.note || "未填寫")}</div>
+                  </section>
+                  ${
+                    includePhotos
+                      ? `<section class="section">
+                          <h3>現場施工照</h3>
+                          ${attachmentPrintHtml(report.attachments || [])}
+                        </section>`
+                      : ""
+                  }
+                </div>
+              </article>
+            `,
+          )
+          .join("")}
+        <div class="no-print">
+          <button type="button" onclick="window.print()">列印 / 另存 PDF</button>
+        </div>
+        <script>
+          window.addEventListener("load", () => {
+            setTimeout(() => window.print(), 400);
+          });
+        </script>
+      </body>
+    </html>`;
+}
+
+function openDailyReportsPdfExport(options) {
+  const printWindow = window.open("", "_blank", "width=1100,height=800");
+  if (!printWindow) return false;
+  printWindow.document.open();
+  printWindow.document.write(dailyReportsPrintHtml(options));
+  printWindow.document.close();
+  return true;
+}
+
+function meetingRecordsPrintHtml({ project, records, from, to, includeAttachments }) {
+  const generatedAt = new Intl.DateTimeFormat("zh-TW", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+  const typeSummary = records.reduce((summary, record) => {
+    const type = record.meetingType || "未分類會議";
+    summary[type] = (summary[type] || 0) + 1;
+    return summary;
+  }, {});
+
+  return `<!doctype html>
+    <html lang="zh-Hant">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(project.name)} 會議紀錄匯出</title>
+        <style>
+          @page { size: A4; margin: 14mm; }
+          * { box-sizing: border-box; }
+          body {
+            color: #0f172a;
+            font-family: "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
+            margin: 0;
+            line-height: 1.55;
+          }
+          h1, h2, h3, p { margin: 0; }
+          .cover {
+            border-bottom: 3px solid #0f172a;
+            margin-bottom: 18px;
+            padding-bottom: 14px;
+          }
+          .eyebrow { color: #64748b; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+          h1 { font-size: 26px; margin-top: 6px; }
+          .meta, .summary {
+            display: grid;
+            gap: 8px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            margin-top: 14px;
+          }
+          .summary { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 20px; }
+          .meta div, .summary div {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 9px 10px;
+          }
+          .label { color: #64748b; display: block; font-size: 11px; }
+          .value { display: block; font-size: 14px; font-weight: 700; margin-top: 2px; }
+          .record {
+            break-inside: avoid;
+            border: 1px solid #cbd5e1;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            overflow: hidden;
+          }
+          .record-header {
+            background: #0f172a;
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 14px;
+          }
+          .record-body { padding: 12px 14px; }
+          .section { margin-top: 12px; }
+          .section h3 { font-size: 15px; margin-bottom: 6px; }
+          table {
+            border-collapse: collapse;
+            font-size: 12px;
+            width: 100%;
+          }
+          th, td {
+            border: 1px solid #e2e8f0;
+            padding: 7px 8px;
+            text-align: left;
+            vertical-align: top;
+          }
+          th { background: #f8fafc; color: #475569; }
+          .note {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 12px;
+            min-height: 36px;
+            padding: 9px 10px;
+            white-space: pre-wrap;
+          }
+          .empty { color: #64748b; font-size: 12px; }
+          .photos {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+          figure {
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            margin: 0;
+            overflow: hidden;
+            padding: 6px;
+          }
+          figure img {
+            aspect-ratio: 4 / 3;
+            display: block;
+            object-fit: cover;
+            width: 100%;
+          }
+          figcaption {
+            color: #475569;
+            font-size: 11px;
+            margin-top: 5px;
+            word-break: break-word;
+          }
+          .no-print { margin-top: 18px; }
+          .no-print button {
+            background: #0f172a;
+            border: 0;
+            border-radius: 10px;
+            color: white;
+            cursor: pointer;
+            font: inherit;
+            padding: 10px 14px;
+          }
+          @media print {
+            .no-print { display: none; }
+            .record { page-break-inside: avoid; }
+          }
+        </style>
+      </head>
+      <body>
+        <section class="cover">
+          <p class="eyebrow">EZtoDO工程管理程式｜會議紀錄 PDF 匯出</p>
+          <h1>${escapeHtml(project.name)} 會議紀錄彙整</h1>
+          <div class="meta">
+            <div><span class="label">工地地址</span><span class="value">${escapeHtml(project.address || "未填寫")}</span></div>
+            <div><span class="label">日期區間</span><span class="value">${escapeHtml(from || "不限")} 至 ${escapeHtml(to || "不限")}</span></div>
+            <div><span class="label">匯出時間</span><span class="value">${escapeHtml(generatedAt)}</span></div>
+            <div><span class="label">附件</span><span class="value">${includeAttachments ? "包含" : "不包含"}</span></div>
+          </div>
+        </section>
+        <section class="summary">
+          <div><span class="label">會議筆數</span><span class="value">${records.length}</span></div>
+          <div><span class="label">會議類型</span><span class="value">${escapeHtml(Object.keys(typeSummary).length || 0)}</span></div>
+          <div><span class="label">匯出版本</span><span class="value">${escapeHtml(APP_VERSION)}</span></div>
+        </section>
+        ${records
+          .map(
+            (record) => `
+              <article class="record">
+                <header class="record-header">
+                  <div>
+                    <h2>${escapeHtml(record.date)} ${escapeHtml(record.meetingType || "會議紀錄")}</h2>
+                    <p>${escapeHtml(record.title || "未命名會議")}｜地點：${escapeHtml(record.location || "未填寫")}</p>
+                  </div>
+                  <p>記錄：${escapeHtml(record.recorder || "未填寫")}</p>
+                </header>
+                <div class="record-body">
+                  <section class="section">
+                    <h3>基本資訊</h3>
+                    <table>
+                      <tbody>
+                        <tr><th>主席 / 主持人</th><td>${escapeHtml(record.chair || "未填寫")}</td><th>記錄人員</th><td>${escapeHtml(record.recorder || "未填寫")}</td></tr>
+                        <tr><th>會議地點</th><td>${escapeHtml(record.location || "未填寫")}</td><th>會議日期</th><td>${escapeHtml(record.date || "未設定")}</td></tr>
+                      </tbody>
+                    </table>
+                  </section>
+                  <section class="section">
+                    <h3>與會人員</h3>
+                    ${dailyReportRowsHtml(record.attendees || [], [
+                      ["name", "姓名"],
+                      ["company", "單位 / 公司"],
+                      ["role", "職務"],
+                      ["note", "備註"],
+                    ])}
+                  </section>
+                  <section class="section">
+                    <h3>會議內容 / 決議事項</h3>
+                    ${dailyReportRowsHtml(record.items || [], [
+                      ["topic", "項目"],
+                      ["content", "內容"],
+                      ["decision", "決議 / 待辦"],
+                      ["owner", "負責人"],
+                      ["dueDate", "期限"],
+                      ["note", "備註"],
+                    ])}
+                  </section>
+                  <section class="section">
+                    <h3>其他備註</h3>
+                    <div class="note">${escapeHtml(record.note || "未填寫")}</div>
+                  </section>
+                  ${
+                    includeAttachments
+                      ? `<section class="section">
+                          <h3>附件圖片</h3>
+                          ${attachmentPrintHtml(record.attachments || [])}
+                        </section>`
+                      : ""
+                  }
+                </div>
+              </article>
+            `,
+          )
+          .join("")}
+        <div class="no-print">
+          <button type="button" onclick="window.print()">列印 / 另存 PDF</button>
+        </div>
+        <script>
+          window.addEventListener("load", () => {
+            setTimeout(() => window.print(), 400);
+          });
+        </script>
+      </body>
+    </html>`;
+}
+
+function openMeetingRecordsPdfExport(options) {
+  const printWindow = window.open("", "_blank", "width=1100,height=800");
+  if (!printWindow) return false;
+  printWindow.document.open();
+  printWindow.document.write(meetingRecordsPrintHtml(options));
+  printWindow.document.close();
+  return true;
 }
 
 function fileToDataUrl(file) {
@@ -3185,6 +3706,11 @@ function Daily({ p }) {
   const [dateQuery, setDateQuery] = useState("");
   const [keywordQuery, setKeywordQuery] = useState("");
   const [openReportId, setOpenReportId] = useState("");
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportFrom, setExportFrom] = useState("");
+  const [exportTo, setExportTo] = useState("");
+  const [exportIncludePhotos, setExportIncludePhotos] = useState(true);
+  const [exportError, setExportError] = useState("");
   const {
     items: savedReports,
     saveItem: saveDailyRecord,
@@ -3217,6 +3743,18 @@ function Daily({ p }) {
     resetDaily();
     setAdding(true);
     setOpenReportId("");
+  }
+
+  function openExportPanel() {
+    const datedReports = savedReports
+      .map((report) => compareDateKey(report.date))
+      .filter((date) => date && date !== "未填日期")
+      .sort();
+
+    if (!exportFrom && datedReports.length) setExportFrom(datedReports[0]);
+    if (!exportTo && datedReports.length) setExportTo(datedReports[datedReports.length - 1]);
+    setExportError("");
+    setExportOpen(true);
   }
 
   function selectPaperReport(event) {
@@ -3349,6 +3887,32 @@ function Daily({ p }) {
     return matchesDate && matchesKeyword;
   });
 
+  const exportReports = savedReports
+    .filter((report) => (!exportFrom && !exportTo ? true : isDateInRange(report.date, exportFrom, exportTo)))
+    .sort((a, b) => compareDateKey(a.date).localeCompare(compareDateKey(b.date)));
+
+  function handleDailyPdfExport() {
+    if (!exportReports.length) {
+      setExportError("日期區間內沒有可匯出的施工日報。");
+      return;
+    }
+
+    const opened = openDailyReportsPdfExport({
+      project: p,
+      reports: exportReports,
+      from: exportFrom,
+      to: exportTo,
+      includePhotos: exportIncludePhotos,
+    });
+
+    if (!opened) {
+      setExportError("瀏覽器封鎖了匯出視窗，請允許彈出視窗後再試一次。");
+      return;
+    }
+
+    setExportError("");
+  }
+
   return (
     <div>
       <Header
@@ -3357,10 +3921,61 @@ function Daily({ p }) {
         btn="新增日報"
         onAdd={openDailyForm}
       />
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
+        <Button type="button" variant="outline" onClick={openExportPanel}>
+          <FileDown className="mr-2 h-4 w-4" />
+          匯出 PDF
+        </Button>
+      </div>
       {dailyError ? (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {dailyError}
         </div>
+      ) : null}
+      {exportOpen ? (
+        <Card className="mb-4">
+          <CardContent className="grid gap-4 p-5 md:grid-cols-[1fr_1fr_auto] md:items-end">
+            <label>
+              <span className="text-sm font-medium">開始日期</span>
+              <div className="mt-2">
+                <Input type="date" value={exportFrom} onChange={setExportFrom} />
+              </div>
+            </label>
+            <label>
+              <span className="text-sm font-medium">結束日期</span>
+              <div className="mt-2">
+                <Input type="date" value={exportTo} onChange={setExportTo} />
+              </div>
+            </label>
+            <label className="flex min-h-11 items-center gap-2 rounded-xl border bg-slate-50 px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={exportIncludePhotos}
+                onChange={(event) => setExportIncludePhotos(event.target.checked)}
+              />
+              包含施工照
+            </label>
+            <div className="md:col-span-3 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-slate-500">
+                匯出筆數：{exportReports.length} 筆
+              </p>
+              <ActionBar>
+                <Button type="button" variant="outline" onClick={() => setExportOpen(false)}>
+                  收合
+                </Button>
+                <Button type="button" onClick={handleDailyPdfExport}>
+                  <FileDown className="mr-2 h-4 w-4" />
+                  產生 PDF
+                </Button>
+              </ActionBar>
+            </div>
+            {exportError ? (
+              <div className="md:col-span-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {exportError}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
       ) : null}
       {adding ? (
         <Card className="mb-4">
@@ -3795,6 +4410,571 @@ function DailyReportTable({ title, rows = [], columns = [] }) {
       ) : (
         <p className="p-4 text-sm text-slate-500">尚無資料。</p>
       )}
+    </div>
+  );
+}
+
+function createMeetingDraft(project) {
+  return {
+    meetingType: meetingTypeOptions[0],
+    title: "",
+    date: todayKey(),
+    location: "",
+    chair: "",
+    recorder: "",
+    attendees: [{ id: 1, name: "", company: "", role: "", note: "" }],
+    items: [{ id: 2, topic: "", content: "", decision: "", owner: "", dueDate: "", note: "" }],
+    note: "",
+    attachments: [],
+    projectId: project.id,
+    projectName: project.name,
+  };
+}
+
+function stripRowIds(rows = []) {
+  return rows
+    .map(({ id, ...row }) => row)
+    .filter((row) => Object.values(row).some((value) => String(value || "").trim()));
+}
+
+function Meetings({ p }) {
+  const { items, saveItem, deleteItem, loading, error } = useProjectRecords(p, "meetings", []);
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState(() => createMeetingDraft(p));
+  const [query, setQuery] = useState("");
+  const [openId, setOpenId] = useState("");
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportFrom, setExportFrom] = useState("");
+  const [exportTo, setExportTo] = useState("");
+  const [exportIncludeAttachments, setExportIncludeAttachments] = useState(true);
+  const [exportError, setExportError] = useState("");
+
+  function resetDraft() {
+    setDraft(createMeetingDraft(p));
+  }
+
+  function updateAttendee(id, key, value) {
+    setDraft((current) => ({
+      ...current,
+      attendees: current.attendees.map((row) => (row.id === id ? { ...row, [key]: value } : row)),
+    }));
+  }
+
+  function updateItem(id, key, value) {
+    setDraft((current) => ({
+      ...current,
+      items: current.items.map((row) => (row.id === id ? { ...row, [key]: value } : row)),
+    }));
+  }
+
+  function addAttendee() {
+    setDraft((current) => ({
+      ...current,
+      attendees: [...current.attendees, { id: Date.now(), name: "", company: "", role: "", note: "" }],
+    }));
+  }
+
+  function addMeetingItem() {
+    setDraft((current) => ({
+      ...current,
+      items: [
+        ...current.items,
+        { id: Date.now(), topic: "", content: "", decision: "", owner: "", dueDate: "", note: "" },
+      ],
+    }));
+  }
+
+  function removeAttendee(id) {
+    setDraft((current) => ({
+      ...current,
+      attendees:
+        current.attendees.length === 1
+          ? current.attendees
+          : current.attendees.filter((row) => row.id !== id),
+    }));
+  }
+
+  function removeMeetingItem(id) {
+    setDraft((current) => ({
+      ...current,
+      items: current.items.length === 1 ? current.items : current.items.filter((row) => row.id !== id),
+    }));
+  }
+
+  async function saveMeeting() {
+    const attendees = stripRowIds(draft.attendees);
+    const meetingItems = stripRowIds(draft.items);
+    const next = {
+      ...draft,
+      title: draft.title || `${draft.meetingType}紀錄`,
+      location: draft.location || "未填寫",
+      chair: draft.chair || "未填寫",
+      recorder: draft.recorder || "未填寫",
+      attendees,
+      attendeeCount: attendees.length,
+      items: meetingItems,
+      itemCount: meetingItems.length,
+      attachments: draft.attachments || [],
+      projectId: p.id,
+      projectName: p.name,
+    };
+
+    await saveItem(next, {
+      title: `${next.date} ${next.title}`,
+      status: next.meetingType,
+    });
+    resetDraft();
+    setAdding(false);
+  }
+
+  const filteredMeetings = items.filter((record) => {
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) return true;
+    const searchable = [
+      record.date,
+      record.meetingType,
+      record.title,
+      record.location,
+      record.chair,
+      record.recorder,
+      record.note,
+      ...(record.attendees || []).flatMap((row) => [row.name, row.company, row.role, row.note]),
+      ...(record.items || []).flatMap((row) => [
+        row.topic,
+        row.content,
+        row.decision,
+        row.owner,
+        row.dueDate,
+        row.note,
+      ]),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return searchable.includes(keyword);
+  });
+
+  const exportRecords = items
+    .filter((record) => (!exportFrom && !exportTo ? true : isDateInRange(record.date, exportFrom, exportTo)))
+    .sort((a, b) => compareDateKey(a.date).localeCompare(compareDateKey(b.date)));
+
+  function openExportPanel() {
+    const dates = items
+      .map((record) => compareDateKey(record.date))
+      .filter((date) => date && date !== "未填日期")
+      .sort();
+    if (!exportFrom && dates.length) setExportFrom(dates[0]);
+    if (!exportTo && dates.length) setExportTo(dates[dates.length - 1]);
+    setExportError("");
+    setExportOpen(true);
+  }
+
+  function exportMeetingsPdf() {
+    if (!exportRecords.length) {
+      setExportError("日期區間內沒有可匯出的會議紀錄。");
+      return;
+    }
+
+    const opened = openMeetingRecordsPdfExport({
+      project: p,
+      records: exportRecords,
+      from: exportFrom,
+      to: exportTo,
+      includeAttachments: exportIncludeAttachments,
+    });
+
+    if (!opened) {
+      setExportError("瀏覽器封鎖了匯出視窗，請允許彈出視窗後再試一次。");
+      return;
+    }
+
+    setExportError("");
+  }
+
+  return (
+    <div>
+      <Header
+        title="會議紀錄"
+        sub={`目前工地：${p.name}，可建立工具箱、承攬商、工務與協議組織會議紀錄`}
+        btn="新增會議紀錄"
+        onAdd={() => {
+          resetDraft();
+          setAdding(true);
+          setOpenId("");
+        }}
+      />
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
+        <Button type="button" variant="outline" onClick={openExportPanel}>
+          <FileDown className="mr-2 h-4 w-4" />
+          匯出 PDF
+        </Button>
+      </div>
+      {error ? (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      ) : null}
+      {exportOpen ? (
+        <Card className="mb-4">
+          <CardContent className="grid gap-4 p-5 md:grid-cols-[1fr_1fr_auto] md:items-end">
+            <label>
+              <span className="text-sm font-medium">開始日期</span>
+              <div className="mt-2">
+                <Input type="date" value={exportFrom} onChange={setExportFrom} />
+              </div>
+            </label>
+            <label>
+              <span className="text-sm font-medium">結束日期</span>
+              <div className="mt-2">
+                <Input type="date" value={exportTo} onChange={setExportTo} />
+              </div>
+            </label>
+            <label className="flex min-h-11 items-center gap-2 rounded-xl border bg-slate-50 px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={exportIncludeAttachments}
+                onChange={(event) => setExportIncludeAttachments(event.target.checked)}
+              />
+              包含附件圖片
+            </label>
+            <div className="md:col-span-3 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-slate-500">匯出筆數：{exportRecords.length} 筆</p>
+              <ActionBar>
+                <Button type="button" variant="outline" onClick={() => setExportOpen(false)}>
+                  收合
+                </Button>
+                <Button type="button" onClick={exportMeetingsPdf}>
+                  <FileDown className="mr-2 h-4 w-4" />
+                  產生 PDF
+                </Button>
+              </ActionBar>
+            </div>
+            {exportError ? (
+              <div className="md:col-span-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {exportError}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+      {adding ? (
+        <Card className="mb-4">
+          <CardContent className="grid gap-4 p-5 md:grid-cols-2">
+            <label>
+              <span className="text-sm font-medium">會議類型</span>
+              <CustomSelect
+                value={draft.meetingType}
+                onChange={(value) => setDraft({ ...draft, meetingType: value })}
+                options={meetingTypeOptions}
+                className="mt-2 space-y-2"
+                otherPlaceholder="請輸入自訂會議類型"
+              />
+            </label>
+            <label>
+              <span className="text-sm font-medium">會議日期</span>
+              <div className="mt-2">
+                <Input type="date" value={draft.date} onChange={(value) => setDraft({ ...draft, date: value })} />
+              </div>
+            </label>
+            <label>
+              <span className="text-sm font-medium">會議名稱</span>
+              <div className="mt-2">
+                <Input
+                  value={draft.title}
+                  onChange={(value) => setDraft({ ...draft, title: value })}
+                  ph="例如：第 5 次承攬商會議"
+                />
+              </div>
+            </label>
+            <label>
+              <span className="text-sm font-medium">會議地點</span>
+              <div className="mt-2">
+                <Input
+                  value={draft.location}
+                  onChange={(value) => setDraft({ ...draft, location: value })}
+                  ph="例如：工務所會議室"
+                />
+              </div>
+            </label>
+            <label>
+              <span className="text-sm font-medium">主席 / 主持人</span>
+              <div className="mt-2">
+                <Input value={draft.chair} onChange={(value) => setDraft({ ...draft, chair: value })} />
+              </div>
+            </label>
+            <label>
+              <span className="text-sm font-medium">記錄人員</span>
+              <div className="mt-2">
+                <Input value={draft.recorder} onChange={(value) => setDraft({ ...draft, recorder: value })} />
+              </div>
+            </label>
+            <div className="md:col-span-2 rounded-2xl border p-4">
+              <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <h3 className="font-bold">與會人員</h3>
+                <Button type="button" variant="outline" onClick={addAttendee}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  新增與會人員
+                </Button>
+              </div>
+              <div className="grid gap-3">
+                {draft.attendees.map((row, index) => (
+                  <div key={row.id} className="rounded-2xl bg-slate-50 p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                      <b>人員 {index + 1}</b>
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        onClick={() => removeAttendee(row.id)}
+                        disabled={draft.attendees.length === 1}
+                      >
+                        刪除
+                      </Button>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <Input value={row.name} onChange={(value) => updateAttendee(row.id, "name", value)} ph="姓名" />
+                      <Input
+                        value={row.company}
+                        onChange={(value) => updateAttendee(row.id, "company", value)}
+                        ph="單位 / 公司"
+                      />
+                      <Input value={row.role} onChange={(value) => updateAttendee(row.id, "role", value)} ph="職務" />
+                      <Input value={row.note} onChange={(value) => updateAttendee(row.id, "note", value)} ph="備註" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="md:col-span-2 rounded-2xl border p-4">
+              <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <h3 className="font-bold">會議內容 / 決議事項</h3>
+                <Button type="button" variant="outline" onClick={addMeetingItem}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  新增內容列
+                </Button>
+              </div>
+              <div className="grid gap-3">
+                {draft.items.map((row, index) => (
+                  <div key={row.id} className="rounded-2xl bg-slate-50 p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                      <b>內容 {index + 1}</b>
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        onClick={() => removeMeetingItem(row.id)}
+                        disabled={draft.items.length === 1}
+                      >
+                        刪除
+                      </Button>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      <Input value={row.topic} onChange={(value) => updateItem(row.id, "topic", value)} ph="項目" />
+                      <Input value={row.owner} onChange={(value) => updateItem(row.id, "owner", value)} ph="負責人" />
+                      <Input
+                        type="date"
+                        value={row.dueDate}
+                        onChange={(value) => updateItem(row.id, "dueDate", value)}
+                      />
+                      <label className="md:col-span-2 xl:col-span-3">
+                        <span className="text-sm font-medium">內容</span>
+                        <textarea
+                          value={row.content}
+                          onChange={(event) => updateItem(row.id, "content", event.target.value)}
+                          className="mt-2 min-h-20 w-full rounded-xl border px-3 py-2 outline-none"
+                          placeholder="會議討論內容"
+                        />
+                      </label>
+                      <label className="md:col-span-2 xl:col-span-3">
+                        <span className="text-sm font-medium">決議 / 待辦</span>
+                        <textarea
+                          value={row.decision}
+                          onChange={(event) => updateItem(row.id, "decision", event.target.value)}
+                          className="mt-2 min-h-20 w-full rounded-xl border px-3 py-2 outline-none"
+                          placeholder="會議決議、待辦事項或追蹤條件"
+                        />
+                      </label>
+                      <label className="md:col-span-2 xl:col-span-3">
+                        <span className="text-sm font-medium">備註</span>
+                        <textarea
+                          value={row.note}
+                          onChange={(event) => updateItem(row.id, "note", event.target.value)}
+                          className="mt-2 min-h-16 w-full rounded-xl border px-3 py-2 outline-none"
+                          placeholder="補充說明"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <label className="md:col-span-2">
+              <span className="text-sm font-medium">其他備註</span>
+              <textarea
+                value={draft.note}
+                onChange={(event) => setDraft({ ...draft, note: event.target.value })}
+                className="mt-2 min-h-24 w-full rounded-xl border px-3 py-2 outline-none"
+                placeholder="補充會議結論、下次會議提醒或其他說明"
+              />
+            </label>
+            <ImageAttachments
+              className="md:col-span-2"
+              title="會議附件圖片"
+              description="可附上簽到表、白板照片、現場照片或會議文件截圖。"
+              buttonLabel="上傳附件"
+              value={draft.attachments}
+              onChange={(attachments) => setDraft({ ...draft, attachments })}
+            />
+            <ActionBar className="md:col-span-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  resetDraft();
+                  setAdding(false);
+                }}
+              >
+                取消
+              </Button>
+              <Button type="button" onClick={saveMeeting}>
+                <Save className="mr-2 h-4 w-4" />
+                儲存會議紀錄
+              </Button>
+            </ActionBar>
+          </CardContent>
+        </Card>
+      ) : null}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h2 className="text-lg font-bold">已儲存會議紀錄</h2>
+              <p className="mt-1 text-sm text-slate-500">可搜尋會議類型、與會人員、決議內容、負責人或備註。</p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_auto]">
+              <label>
+                <span className="text-xs font-medium text-slate-500">快速檢索</span>
+                <div className="mt-1">
+                  <Input value={query} onChange={setQuery} ph="搜尋會議、與會人員、決議或備註" />
+                </div>
+              </label>
+              <Button type="button" variant="outline" className="self-end" onClick={() => setQuery("")}>
+                清除
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+      {loading ? (
+        <div className="mt-4 rounded-2xl border border-dashed p-6 text-center text-sm text-slate-500">
+          讀取會議紀錄中
+        </div>
+      ) : null}
+      {filteredMeetings.length ? (
+        <div className="mt-4 grid gap-3">
+          {filteredMeetings.map((record) => {
+            const isOpen = openId === record.id;
+            return (
+              <Card key={record.id}>
+                <CardContent className="p-4">
+                  <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                    <button
+                      type="button"
+                      onClick={() => setOpenId(isOpen ? "" : record.id)}
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-bold">{record.date} {record.title}</h3>
+                        <Badge>{record.meetingType}</Badge>
+                        <Badge>{isOpen ? "已展開" : "點擊查看"}</Badge>
+                      </div>
+                      <p className="mt-1 text-sm text-slate-500">
+                        地點：{record.location || "未填寫"}｜主席：{record.chair || "未填寫"}｜記錄：{record.recorder || "未填寫"}
+                      </p>
+                      <p className="text-sm text-slate-500">
+                        與會 {record.attendeeCount || record.attendees?.length || 0} 人｜內容 {record.itemCount || record.items?.length || 0} 筆
+                      </p>
+                      <AttachmentSummary attachments={record.attachments} />
+                    </button>
+                    <div className="flex items-center gap-2">
+                      <Button type="button" variant="outline" onClick={() => setOpenId(isOpen ? "" : record.id)}>
+                        {isOpen ? "收合" : "查看詳情"}
+                      </Button>
+                      <Del icon label={`${record.date} ${record.title}`} onClick={() => deleteItem(record.id)} />
+                    </div>
+                  </div>
+                  {isOpen ? <MeetingRecordDetails record={record} /> : null}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      ) : !loading ? (
+        <div className="mt-4 rounded-2xl border border-dashed p-6 text-center text-sm text-slate-500">
+          {items.length ? "找不到符合條件的會議紀錄。" : "尚無已儲存會議紀錄。"}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MeetingRecordDetails({ record }) {
+  return (
+    <div className="mt-4 grid gap-4 border-t pt-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-xl bg-slate-50 p-3">
+          <p className="text-xs text-slate-500">會議類型</p>
+          <p className="mt-1 font-bold">{record.meetingType || "未分類"}</p>
+        </div>
+        <div className="rounded-xl bg-slate-50 p-3">
+          <p className="text-xs text-slate-500">會議日期</p>
+          <p className="mt-1 font-bold">{record.date || "未設定"}</p>
+        </div>
+        <div className="rounded-xl bg-slate-50 p-3">
+          <p className="text-xs text-slate-500">主席 / 主持人</p>
+          <p className="mt-1 font-bold">{record.chair || "未填寫"}</p>
+        </div>
+        <div className="rounded-xl bg-slate-50 p-3">
+          <p className="text-xs text-slate-500">記錄人員</p>
+          <p className="mt-1 font-bold">{record.recorder || "未填寫"}</p>
+        </div>
+      </div>
+      <DailyReportTable
+        title="與會人員"
+        rows={record.attendees || []}
+        columns={[
+          ["name", "姓名"],
+          ["company", "單位 / 公司"],
+          ["role", "職務"],
+          ["note", "備註"],
+        ]}
+      />
+      <DailyReportTable
+        title="會議內容 / 決議事項"
+        rows={record.items || []}
+        columns={[
+          ["topic", "項目"],
+          ["content", "內容"],
+          ["decision", "決議 / 待辦"],
+          ["owner", "負責人"],
+          ["dueDate", "期限"],
+          ["note", "備註"],
+        ]}
+      />
+      <div className="rounded-2xl border p-4">
+        <h4 className="font-bold">其他備註</h4>
+        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">
+          {record.note || "未填寫"}
+        </p>
+      </div>
+      <div className="rounded-2xl border p-4">
+        <h4 className="font-bold">附件圖片</h4>
+        {record.attachments?.length ? (
+          <AttachmentSummary attachments={record.attachments} />
+        ) : (
+          <p className="mt-2 text-sm text-slate-500">未附加圖片。</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -4525,6 +5705,8 @@ function Manual() {
         "施工日報可記錄天氣、工班人數、材料與機具，也可上傳紙本日報照片交由 AI 先行填入。",
         "AI 判讀結果會先進入可編輯表格，確認無誤後再自行儲存。",
         "現場施工照可附掛在日報內，暫時限制每份日報最多 10 張。",
+        "施工日報可依日期區間匯出 PDF，並可選擇是否包含施工照。",
+        "會議紀錄可保存工具箱、承攬商、工務與協議組織會議，並逐列記錄與會人員與決議事項。",
         "工項 Memo 用來記錄需要追蹤或與業主確認的事項。",
         "缺失改善可登錄位置、類型、負責廠商、期限與嚴重程度。",
       ],
@@ -4563,6 +5745,24 @@ function Manual() {
   const versionNotes = [
     {
       version: APP_VERSION,
+      title: "會議紀錄模組",
+      items: [
+        "左側功能列表新增會議紀錄，可建立工具箱會議、承攬商會議、工務會議與協議組織會議。",
+        "會議表單支援逐列新增與會人員、會議內容、決議事項、負責人與追蹤期限。",
+        "會議紀錄支援日期區間 PDF 匯出，並可選擇是否包含附件圖片。",
+      ],
+    },
+    {
+      version: "eztodo_26052601",
+      title: "施工日報 PDF 匯出",
+      items: [
+        "施工日報新增 PDF 匯出入口，可依日期區間輸出彙整資料。",
+        "匯出內容包含工班、材料、機具、其他備註與彙總資訊。",
+        "匯出時可選擇是否包含現場施工照，方便依報告用途控制版面大小。",
+      ],
+    },
+    {
+      version: "eztodo_26052506",
       title: "檢核表與表單儲存調整",
       items: [
         "階段檢核表移除範例資料，改由使用者自行建立。",
@@ -5782,6 +6982,7 @@ export default function App() {
   const contractRecords = useProjectRecords(p, "contracts", contractSeed);
   const memoRecords = useProjectRecords(p, "memos", memos);
   const scheduleRecords = useProjectRecords(p, "schedule", scheduleSeed);
+  const meetingRecords = useProjectRecords(p, "meetings", []);
   const todoRecords = useProjectRecords(p, "todos", todoSeed);
 
   useEffect(() => {
@@ -5832,6 +7033,7 @@ export default function App() {
     const projectClaims = claimRecords.items;
     const projectMemos = memoRecords.items;
     const projectScheduleItems = scheduleRecords.items;
+    const projectMeetingItems = meetingRecords.items;
     const projectTodoItems = todoRecords.items;
 
     if (active === "manual") return <Manual />;
@@ -5887,6 +7089,7 @@ export default function App() {
         />
       );
     }
+    if (active === "meetings") return <Meetings p={p} items={projectMeetingItems} />;
     if (active === "daily") return <Daily p={p} />;
     if (active === "defects") return <Defects p={p} />;
     if (active === "todos") {
@@ -5907,6 +7110,7 @@ export default function App() {
     contractRecords.items,
     memoRecords.items,
     scheduleRecords.items,
+    meetingRecords.items,
     todoRecords.items,
   ]);
 
