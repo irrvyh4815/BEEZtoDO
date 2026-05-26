@@ -110,7 +110,7 @@ const mods = [
   ["photos", "照片中心"],
 ].map(([id, label]) => ({ id, label, icon: I[id] }));
 
-const APP_VERSION = "eztodo_26052602";
+const APP_VERSION = "eztodo_26052604";
 const SAMPLE_PROJECT_NAME = "範例工地：東區住宅新建工程";
 const DAILY_AI_SOURCE_MAX_BYTES = 3 * 1024 * 1024;
 
@@ -1299,6 +1299,60 @@ function openDailyReportsPdfExport(options) {
   return true;
 }
 
+function formatResourceQuantity(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return 0;
+  return Number.isInteger(number) ? number : Number(number.toFixed(2));
+}
+
+function summarizeDailyReportResources(reports = []) {
+  const tradeMap = {};
+  const materialMap = {};
+  const equipmentMap = {};
+  let totalWorkers = 0;
+
+  function addQuantity(map, key, quantity, unit = "") {
+    const name = String(key || "").trim() || "未分類";
+    const amount = Number(quantity || 0);
+    if (!map[name]) {
+      map[name] = { name, quantity: 0, entries: 0, unit: unit || "" };
+    }
+    map[name].quantity += Number.isFinite(amount) ? amount : 0;
+    map[name].entries += 1;
+    if (!map[name].unit && unit) map[name].unit = unit;
+  }
+
+  reports.forEach((report) => {
+    (report.work || []).forEach((row) => {
+      const name = String(row.trade || "").trim() || "未分類工種";
+      const workers = Number(row.workers || 0);
+      if (!tradeMap[name]) tradeMap[name] = { name, workers: 0, entries: 0 };
+      tradeMap[name].workers += Number.isFinite(workers) ? workers : 0;
+      tradeMap[name].entries += 1;
+      totalWorkers += Number.isFinite(workers) ? workers : 0;
+    });
+
+    (report.materials || []).forEach((row) => {
+      addQuantity(materialMap, row.name, row.quantity, row.unit);
+    });
+
+    (report.equipment || []).forEach((row) => {
+      addQuantity(equipmentMap, row.name, row.quantity);
+    });
+  });
+
+  const sortByValue = (items, key) =>
+    Object.values(items).sort((a, b) => (Number(b[key]) || 0) - (Number(a[key]) || 0));
+
+  return {
+    reportCount: reports.length,
+    totalWorkers,
+    tradeTotals: sortByValue(tradeMap, "workers"),
+    materialTotals: sortByValue(materialMap, "quantity"),
+    equipmentTotals: sortByValue(equipmentMap, "quantity"),
+  };
+}
+
 function meetingRecordsPrintHtml({ project, records, from, to, includeAttachments }) {
   const generatedAt = new Intl.DateTimeFormat("zh-TW", {
     year: "numeric",
@@ -1684,6 +1738,63 @@ function LoadingScreen() {
         </div>
       </div>
     </Shell>
+  );
+}
+
+function LoginTransitionScreen({ user, onDone }) {
+  useEffect(() => {
+    const timer = window.setTimeout(onDone, 1200);
+    return () => window.clearTimeout(timer);
+  }, [onDone]);
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-950 p-4 text-white">
+      <motion.div
+        initial={{ opacity: 0, y: 18, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.35, ease: "easeOut" }}
+        className="w-full max-w-md rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-medium text-slate-400">EZtoDO工程管理程式</p>
+            <h1 className="mt-2 text-2xl font-bold">正在開啟工作台</h1>
+            <p className="mt-2 text-sm text-slate-300">
+              {user?.name || "使用者"}，正在整理你的工地資料與權限。
+            </p>
+          </div>
+          <motion.div
+            animate={{ rotate: [0, 8, -6, 0] }}
+            transition={{ duration: 0.8, repeat: Infinity, repeatDelay: 0.2 }}
+            className="rounded-2xl bg-white p-3 text-slate-950"
+          >
+            <Building2 className="h-7 w-7" />
+          </motion.div>
+        </div>
+        <div className="mt-6 grid gap-3">
+          {["確認帳號權限", "載入工地清單", "準備表單模組"].map((text, index) => (
+            <motion.div
+              key={text}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.18 + index * 0.15, duration: 0.25 }}
+              className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-200"
+            >
+              <CheckSquare className="h-4 w-4 text-emerald-300" />
+              {text}
+            </motion.div>
+          ))}
+        </div>
+        <div className="mt-6 h-2 overflow-hidden rounded-full bg-white/10">
+          <motion.div
+            initial={{ width: "0%" }}
+            animate={{ width: "100%" }}
+            transition={{ duration: 1.05, ease: "easeInOut" }}
+            className="h-full rounded-full bg-white"
+          />
+        </div>
+      </motion.div>
+    </div>
   );
 }
 
@@ -2884,7 +2995,81 @@ function ProjectMembers({ project }) {
   );
 }
 
-function Dashboard({ p, claims, memoItems, todoItems, contractItems }) {
+function ResourceTotalColumn({ title, emptyText, items, renderValue }) {
+  return (
+    <div className="rounded-2xl border bg-slate-50 p-4">
+      <h3 className="font-bold">{title}</h3>
+      {items.length ? (
+        <div className="mt-3 space-y-2">
+          {items.slice(0, 8).map((item) => (
+            <div key={item.name} className="flex items-start justify-between gap-3 rounded-xl bg-white p-3 text-sm">
+              <div className="min-w-0">
+                <p className="break-words font-medium text-slate-900">{item.name}</p>
+                <p className="mt-1 text-xs text-slate-500">紀錄 {item.entries} 筆</p>
+              </div>
+              <b className="shrink-0 whitespace-nowrap text-slate-900">{renderValue(item)}</b>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 rounded-xl bg-white p-3 text-sm text-slate-500">{emptyText}</p>
+      )}
+    </div>
+  );
+}
+
+function DailyResourceSummary({ reports = [] }) {
+  const summary = summarizeDailyReportResources(reports);
+
+  return (
+    <Card className="lg:col-span-3">
+      <CardContent className="p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-lg font-bold">日報累計統計</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              由已儲存施工日報自動累加工種出工、材料與機具設備進場數。
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <div className="rounded-xl bg-slate-50 px-3 py-2">
+              <p className="text-xs text-slate-500">日報筆數</p>
+              <p className="font-bold">{summary.reportCount}</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 px-3 py-2">
+              <p className="text-xs text-slate-500">累計出工</p>
+              <p className="font-bold">{summary.totalWorkers} 人次</p>
+            </div>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+          <ResourceTotalColumn
+            title="各工種出工計數"
+            emptyText="尚未有工班出工紀錄。"
+            items={summary.tradeTotals}
+            renderValue={(item) => `${formatResourceQuantity(item.workers)} 人次`}
+          />
+          <ResourceTotalColumn
+            title="材料進場 / 使用累計"
+            emptyText="尚未有材料紀錄。"
+            items={summary.materialTotals}
+            renderValue={(item) =>
+              `${formatResourceQuantity(item.quantity)}${item.unit ? ` ${item.unit}` : ""}`
+            }
+          />
+          <ResourceTotalColumn
+            title="機具設備使用累計"
+            emptyText="尚未有機具設備紀錄。"
+            items={summary.equipmentTotals}
+            renderValue={(item) => `${formatResourceQuantity(item.quantity)} 台次`}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function Dashboard({ p, claims, memoItems, todoItems, contractItems, dailyReports }) {
   const m = p.nextClaim || "2026/05";
   const total = sum(claims, m);
   const summary = byTrade(claims, m);
@@ -2925,6 +3110,7 @@ function Dashboard({ p, claims, memoItems, todoItems, contractItems }) {
         <DashboardCalendar className="lg:col-span-2" project={p} todos={todoItems} memos={memoItems} />
         <ProjectMembers project={p} />
         <VendorContacts contracts={contractItems} />
+        <DailyResourceSummary reports={dailyReports} />
       </div>
     </div>
   );
@@ -3680,7 +3866,7 @@ function Checklists({ p }) {
   );
 }
 
-function Daily({ p }) {
+function Daily({ p, records = {} }) {
   const empty = {
     work: { trade: "", workers: "", description: "", note: "" },
     mat: { name: "", spec: "", quantity: "", unit: "", note: "" },
@@ -3703,21 +3889,19 @@ function Daily({ p }) {
   const [aiMessage, setAiMessage] = useState("");
   const [aiSummary, setAiSummary] = useState(null);
   const [adding, setAdding] = useState(false);
-  const [dateQuery, setDateQuery] = useState("");
+  const [dateFromQuery, setDateFromQuery] = useState("");
+  const [dateToQuery, setDateToQuery] = useState("");
   const [keywordQuery, setKeywordQuery] = useState("");
   const [openReportId, setOpenReportId] = useState("");
-  const [exportOpen, setExportOpen] = useState(false);
-  const [exportFrom, setExportFrom] = useState("");
-  const [exportTo, setExportTo] = useState("");
   const [exportIncludePhotos, setExportIncludePhotos] = useState(true);
   const [exportError, setExportError] = useState("");
   const {
-    items: savedReports,
-    saveItem: saveDailyRecord,
-    deleteItem: deleteDailyRecord,
-    loading: dailyLoading,
-    error: dailyError,
-  } = useProjectRecords(p, "daily", []);
+    items: savedReports = [],
+    saveItem: saveDailyRecord = async () => null,
+    deleteItem: deleteDailyRecord = () => {},
+    loading: dailyLoading = false,
+    error: dailyError = "",
+  } = records;
 
   const upd = (set, id, key, value) =>
     set((items) => items.map((x) => (x.id === id ? { ...x, [key]: value } : x)));
@@ -3743,18 +3927,6 @@ function Daily({ p }) {
     resetDaily();
     setAdding(true);
     setOpenReportId("");
-  }
-
-  function openExportPanel() {
-    const datedReports = savedReports
-      .map((report) => compareDateKey(report.date))
-      .filter((date) => date && date !== "未填日期")
-      .sort();
-
-    if (!exportFrom && datedReports.length) setExportFrom(datedReports[0]);
-    if (!exportTo && datedReports.length) setExportTo(datedReports[datedReports.length - 1]);
-    setExportError("");
-    setExportOpen(true);
   }
 
   function selectPaperReport(event) {
@@ -3853,9 +4025,10 @@ function Daily({ p }) {
   }
 
   const filteredReports = savedReports.filter((report) => {
-    const dateKeyword = dateQuery.trim();
+    const dateFrom = dateFromQuery.trim();
+    const dateTo = dateToQuery.trim();
     const keyword = keywordQuery.trim().toLowerCase();
-    const matchesDate = !dateKeyword || String(report.date || "").includes(dateKeyword);
+    const matchesDate = !dateFrom && !dateTo ? true : isDateInRange(report.date, dateFrom, dateTo);
     const searchableText = [
       report.date,
       report.weather,
@@ -3887,21 +4060,21 @@ function Daily({ p }) {
     return matchesDate && matchesKeyword;
   });
 
-  const exportReports = savedReports
-    .filter((report) => (!exportFrom && !exportTo ? true : isDateInRange(report.date, exportFrom, exportTo)))
-    .sort((a, b) => compareDateKey(a.date).localeCompare(compareDateKey(b.date)));
+  function handleDailyPdfExport(reports = filteredReports, range = {}) {
+    const exportReports = [...reports].sort((a, b) =>
+      compareDateKey(a.date).localeCompare(compareDateKey(b.date)),
+    );
 
-  function handleDailyPdfExport() {
     if (!exportReports.length) {
-      setExportError("日期區間內沒有可匯出的施工日報。");
+      setExportError("目前檢索條件內沒有可匯出的施工日報。");
       return;
     }
 
     const opened = openDailyReportsPdfExport({
       project: p,
       reports: exportReports,
-      from: exportFrom,
-      to: exportTo,
+      from: range.from ?? dateFromQuery,
+      to: range.to ?? dateToQuery,
       includePhotos: exportIncludePhotos,
     });
 
@@ -3921,61 +4094,10 @@ function Daily({ p }) {
         btn="新增日報"
         onAdd={openDailyForm}
       />
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
-        <Button type="button" variant="outline" onClick={openExportPanel}>
-          <FileDown className="mr-2 h-4 w-4" />
-          匯出 PDF
-        </Button>
-      </div>
       {dailyError ? (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {dailyError}
         </div>
-      ) : null}
-      {exportOpen ? (
-        <Card className="mb-4">
-          <CardContent className="grid gap-4 p-5 md:grid-cols-[1fr_1fr_auto] md:items-end">
-            <label>
-              <span className="text-sm font-medium">開始日期</span>
-              <div className="mt-2">
-                <Input type="date" value={exportFrom} onChange={setExportFrom} />
-              </div>
-            </label>
-            <label>
-              <span className="text-sm font-medium">結束日期</span>
-              <div className="mt-2">
-                <Input type="date" value={exportTo} onChange={setExportTo} />
-              </div>
-            </label>
-            <label className="flex min-h-11 items-center gap-2 rounded-xl border bg-slate-50 px-3 py-2 text-sm">
-              <input
-                type="checkbox"
-                checked={exportIncludePhotos}
-                onChange={(event) => setExportIncludePhotos(event.target.checked)}
-              />
-              包含施工照
-            </label>
-            <div className="md:col-span-3 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-slate-500">
-                匯出筆數：{exportReports.length} 筆
-              </p>
-              <ActionBar>
-                <Button type="button" variant="outline" onClick={() => setExportOpen(false)}>
-                  收合
-                </Button>
-                <Button type="button" onClick={handleDailyPdfExport}>
-                  <FileDown className="mr-2 h-4 w-4" />
-                  產生 PDF
-                </Button>
-              </ActionBar>
-            </div>
-            {exportError ? (
-              <div className="md:col-span-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {exportError}
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
       ) : null}
       {adding ? (
         <Card className="mb-4">
@@ -4198,16 +4320,24 @@ function Daily({ p }) {
       ) : null}
       <Card>
         <CardContent className="p-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div className="flex flex-col gap-4">
             <div>
               <h2 className="text-lg font-bold">已儲存日報</h2>
-              <p className="mt-1 text-sm text-slate-500">可依日期、工班、施工項目與備註記事搜尋，並展開查看完整內容。</p>
+              <p className="mt-1 text-sm text-slate-500">
+                可依日期區間、工班、施工項目與備註記事搜尋，並直接匯出符合條件的 A4 PDF。
+              </p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-[160px_minmax(180px,1fr)_auto]">
+            <div className="grid gap-2 xl:grid-cols-[150px_150px_minmax(220px,1fr)_auto_auto] xl:items-end">
               <label>
-                <span className="text-xs font-medium text-slate-500">搜尋日期</span>
+                <span className="text-xs font-medium text-slate-500">開始日期</span>
                 <div className="mt-1">
-                  <Input type="date" value={dateQuery} onChange={setDateQuery} />
+                  <Input type="date" value={dateFromQuery} onChange={setDateFromQuery} />
+                </div>
+              </label>
+              <label>
+                <span className="text-xs font-medium text-slate-500">結束日期</span>
+                <div className="mt-1">
+                  <Input type="date" value={dateToQuery} onChange={setDateToQuery} />
                 </div>
               </label>
               <label>
@@ -4220,18 +4350,42 @@ function Daily({ p }) {
                   />
                 </div>
               </label>
-              <Button
-                type="button"
-                variant="outline"
-                className="self-end"
-                onClick={() => {
-                  setDateQuery("");
-                  setKeywordQuery("");
-                }}
-              >
-                清除
-              </Button>
+              <label className="flex min-h-11 items-center gap-2 rounded-xl border bg-slate-50 px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={exportIncludePhotos}
+                  onChange={(event) => setExportIncludePhotos(event.target.checked)}
+                />
+                包含施工照
+              </label>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-none xl:grid-flow-col">
+                <Button type="button" onClick={() => handleDailyPdfExport()}>
+                  <FileDown className="mr-2 h-4 w-4" />
+                  匯出 PDF
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setDateFromQuery("");
+                    setDateToQuery("");
+                    setKeywordQuery("");
+                    setExportError("");
+                  }}
+                >
+                  清除
+                </Button>
+              </div>
             </div>
+            <div className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+              <p>目前符合：{filteredReports.length} 筆</p>
+              <p>匯出會依日期排序，並使用 A4 版面重新排版。</p>
+            </div>
+            {exportError ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {exportError}
+              </div>
+            ) : null}
           </div>
         </CardContent>
       </Card>
@@ -4275,7 +4429,7 @@ function Daily({ p }) {
                     ) : null}
                     <AttachmentSummary attachments={report.attachments} />
                   </button>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                     <Button
                       type="button"
                       variant="outline"
@@ -4283,6 +4437,21 @@ function Daily({ p }) {
                     >
                       {isOpen ? "收合" : "查看詳情"}
                     </Button>
+                    {isOpen ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() =>
+                          handleDailyPdfExport([report], {
+                            from: compareDateKey(report.date),
+                            to: compareDateKey(report.date),
+                          })
+                        }
+                      >
+                        <FileDown className="mr-2 h-4 w-4" />
+                        列印本張
+                      </Button>
+                    ) : null}
                     <Del icon label={`${report.date} 施工日報`} onClick={() => deleteDailyRecord(report.id)} />
                   </div>
                 </div>
@@ -4294,7 +4463,7 @@ function Daily({ p }) {
         </div>
       ) : !dailyLoading ? (
         <div className="mt-4 rounded-2xl border border-dashed p-6 text-center text-sm text-slate-500">
-          {savedReports.length ? "找不到符合日期的施工日報。" : "尚無已儲存施工日報。"}
+          {savedReports.length ? "找不到符合條件的施工日報。" : "尚無已儲存施工日報。"}
         </div>
       ) : null}
     </div>
@@ -5745,6 +5914,24 @@ function Manual() {
   const versionNotes = [
     {
       version: APP_VERSION,
+      title: "施工日報匯出與總覽累計",
+      items: [
+        "施工日報匯出整合到檢索列，可依日期區間與關鍵字輸出多張日報 PDF。",
+        "展開已儲存日報後可直接列印該張單份日報。",
+        "工地總覽新增工種出工、材料與機具設備累計統計，來源為已儲存施工日報。",
+      ],
+    },
+    {
+      version: "eztodo_26052603",
+      title: "登入後轉場動畫",
+      items: [
+        "登入成功後新增工作台開啟轉場，讓登入頁到工地頁的切換更柔順。",
+        "轉場會顯示帳號權限、工地清單與表單模組載入狀態。",
+        "動畫維持短秒數，不影響日常登入效率。",
+      ],
+    },
+    {
+      version: "eztodo_26052602",
       title: "會議紀錄模組",
       items: [
         "左側功能列表新增會議紀錄，可建立工具箱會議、承攬商會議、工務會議與協議組織會議。",
@@ -6978,12 +7165,14 @@ export default function App() {
   const [p, setP] = useState(null);
   const [moduleListOpen, setModuleListOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [loginTransitionUser, setLoginTransitionUser] = useState(null);
   const claimRecords = useProjectRecords(p, "claims", claimSeed);
   const contractRecords = useProjectRecords(p, "contracts", contractSeed);
   const memoRecords = useProjectRecords(p, "memos", memos);
   const scheduleRecords = useProjectRecords(p, "schedule", scheduleSeed);
   const meetingRecords = useProjectRecords(p, "meetings", []);
   const todoRecords = useProjectRecords(p, "todos", todoSeed);
+  const dailyRecords = useProjectRecords(p, "daily", []);
 
   useEffect(() => {
     if (useLocalPreview) return;
@@ -7020,11 +7209,22 @@ export default function App() {
     setActive("dashboard");
     setModuleListOpen(false);
     setAdminOpen(false);
+    setLoginTransitionUser(null);
     setAuth({ loading: false, user: null });
   }
 
   function closeAdminPanel() {
     if (adminOpen) setAdminOpen(false);
+  }
+
+  function finishLoginTransition() {
+    if (!loginTransitionUser) return;
+    setAuth({ loading: false, user: loginTransitionUser });
+    setActive("dashboard");
+    setP(null);
+    setModuleListOpen(false);
+    setAdminOpen(false);
+    setLoginTransitionUser(null);
   }
 
   const page = useMemo(() => {
@@ -7035,6 +7235,7 @@ export default function App() {
     const projectScheduleItems = scheduleRecords.items;
     const projectMeetingItems = meetingRecords.items;
     const projectTodoItems = todoRecords.items;
+    const projectDailyReports = dailyRecords.items;
 
     if (active === "manual") return <Manual />;
     if (active === "dashboard") {
@@ -7045,6 +7246,7 @@ export default function App() {
           memoItems={projectMemos}
           todoItems={projectTodoItems}
           contractItems={projectContracts}
+          dailyReports={projectDailyReports}
         />
       );
     }
@@ -7090,7 +7292,7 @@ export default function App() {
       );
     }
     if (active === "meetings") return <Meetings p={p} items={projectMeetingItems} />;
-    if (active === "daily") return <Daily p={p} />;
+    if (active === "daily") return <Daily p={p} records={dailyRecords} />;
     if (active === "defects") return <Defects p={p} />;
     if (active === "todos") {
       return (
@@ -7112,19 +7314,24 @@ export default function App() {
     scheduleRecords.items,
     meetingRecords.items,
     todoRecords.items,
+    dailyRecords.items,
+    dailyRecords.loading,
+    dailyRecords.error,
   ]);
 
   if (auth.loading) {
     return <LoadingScreen />;
   }
 
+  if (loginTransitionUser) {
+    return <LoginTransitionScreen user={loginTransitionUser} onDone={finishLoginTransition} />;
+  }
+
   if (!auth.user) {
     return (
       <LoginScreen
         onLogin={(user) => {
-          setAuth({ loading: false, user });
-          setActive("dashboard");
-          setP(null);
+          setLoginTransitionUser(user);
         }}
       />
     );
