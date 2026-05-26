@@ -3858,54 +3858,71 @@ function ProjectMembers({ project }) {
         ) : null}
 
         {canManage ? (
-          <div className="mb-4 grid gap-3 rounded-2xl bg-slate-50 p-4 lg:grid-cols-[minmax(220px,1fr)_170px_170px] xl:grid-cols-[minmax(220px,1fr)_170px_170px_auto_auto_auto]">
-            <Input value={email} onChange={setEmail} ph="輸入已註冊帳號 Email" />
-            <select
-              value={role}
-              onChange={(event) => setRole(event.target.value)}
-              className="w-full rounded-xl border bg-white px-3 py-2 outline-none"
-            >
-              {projectMemberRoleOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <select
-              value={jobTitle}
-              onChange={(event) => setJobTitle(event.target.value)}
-              className="w-full rounded-xl border bg-white px-3 py-2 outline-none"
-            >
-              {projectJobTitleOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-            <label className="flex min-h-11 items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm">
-              <input
-                type="checkbox"
-                checked={canViewClaims}
-                onChange={(event) => setCanViewClaims(event.target.checked)}
-              />
-              可閱覽請款
-            </label>
-            <label className="flex min-h-11 items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm">
-              <input
-                type="checkbox"
-                checked={canViewContracts}
-                onChange={(event) => setCanViewContracts(event.target.checked)}
-              />
-              可閱覽合約
-            </label>
-            <Button type="button" disabled={busy === "add"} onClick={addMember}>
-              {busy === "add" ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="mr-2 h-4 w-4" />
-              )}
-              邀請加入
-            </Button>
+          <div className="mb-4 rounded-2xl border bg-slate-50 p-4">
+            <div className="grid gap-3 lg:grid-cols-[minmax(240px,1fr)_180px_200px]">
+              <label>
+                <span className="text-xs font-medium text-slate-500">邀請帳號 Email</span>
+                <div className="mt-1">
+                  <Input value={email} onChange={setEmail} ph="輸入已註冊帳號 Email" />
+                </div>
+              </label>
+              <label>
+                <span className="text-xs font-medium text-slate-500">工地權限</span>
+                <select
+                  value={role}
+                  onChange={(event) => setRole(event.target.value)}
+                  className="mt-1 w-full rounded-xl border bg-white px-3 py-2 outline-none"
+                >
+                  {projectMemberRoleOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span className="text-xs font-medium text-slate-500">工地職稱</span>
+                <select
+                  value={jobTitle}
+                  onChange={(event) => setJobTitle(event.target.value)}
+                  className="mt-1 w-full rounded-xl border bg-white px-3 py-2 outline-none"
+                >
+                  {projectJobTitleOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="flex min-h-11 items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={canViewClaims}
+                    onChange={(event) => setCanViewClaims(event.target.checked)}
+                  />
+                  可閱覽請款相關文件
+                </label>
+                <label className="flex min-h-11 items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={canViewContracts}
+                    onChange={(event) => setCanViewContracts(event.target.checked)}
+                  />
+                  可閱覽合約相關文件
+                </label>
+              </div>
+              <Button type="button" disabled={busy === "add"} onClick={addMember} className="w-full lg:w-auto">
+                {busy === "add" ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="mr-2 h-4 w-4" />
+                )}
+                邀請加入
+              </Button>
+            </div>
           </div>
         ) : null}
 
@@ -4215,6 +4232,7 @@ function Dashboard({ p, claims, memoItems, todoItems, contractItems, dailyReport
 }
 
 function Claims({ p, claims, contracts = [], onSave, onUpdate, onDelete }) {
+  const claimFormRef = useRef(null);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState(() => createClaimDraft(p, contracts));
   const [editingId, setEditingId] = useState("");
@@ -4238,6 +4256,14 @@ function Claims({ p, claims, contracts = [], onSave, onUpdate, onDelete }) {
   function resetDraft() {
     setDraft(createClaimDraft(p, contracts));
     setEditingId("");
+  }
+
+  function scrollToClaimForm() {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        claimFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
   }
 
   function startEditClaim(claim) {
@@ -4266,6 +4292,7 @@ function Claims({ p, claims, contracts = [], onSave, onUpdate, onDelete }) {
     setEditingId(claim.id);
     setAdding(true);
     setOpenClaimId("");
+    scrollToClaimForm();
   }
 
   function applyContract(contractId) {
@@ -4370,12 +4397,14 @@ function Claims({ p, claims, contracts = [], onSave, onUpdate, onDelete }) {
           resetDraft();
           setAdding(true);
           setOpenClaimId("");
+          scrollToClaimForm();
         }}
       />
 
       {adding ? (
-        <Card className="mb-4">
-          <CardContent className="grid gap-4 p-5 md:grid-cols-2">
+        <div ref={claimFormRef} className="scroll-mt-4">
+          <Card className="mb-4">
+            <CardContent className="grid gap-4 p-5 md:grid-cols-2">
             <div className="md:col-span-2 grid gap-2 rounded-2xl bg-slate-50 p-3 sm:grid-cols-2">
               <Button
                 type="button"
@@ -4550,8 +4579,9 @@ function Claims({ p, claims, contracts = [], onSave, onUpdate, onDelete }) {
                 {editingId ? "更新請款" : "儲存請款"}
               </Button>
             </ActionBar>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
       ) : null}
 
       <div className="grid gap-4">
